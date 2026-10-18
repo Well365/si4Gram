@@ -1,0 +1,653 @@
+{
+  "format": "secutg-a1q-vectors/1",
+  "spec": "PLAN.md 3.40 (3.40.3 validation, 3.40.4 A1Q, 3.40.1 source order, 3.40.2 gate and launch reminder incl. the 2026-10-02 amendment); implemented in src/secutg/config/apiCredentials.ts",
+  "notes": [
+    "A1Q text: A1Q:<api_id>:<api_hash>, exactly three \":\"-separated fields, prefix \"A1Q\" upper case only. Only ASCII whitespace AROUND the whole text is trimmed: space, tab, CR, LF and nothing else (pastes carry newlines); a BOM, NBSP, U+3000 or a control character around it is refused like any other stray character, the same in every client; whitespace inside, a fourth field, or anything else is refused (SecutgApiScanBad). A refusal is expect = null.",
+    "api_id: 1-10 digits, no leading zero, value 1..2147483647 (api_id is a TL int, signed 32-bit). api_hash: 32 hex characters, upper case accepted and lowered. buildA1Q always writes the hash in lower case.",
+    "validate: the two form fields; each is trimmed first, of the same ASCII whitespace (space, tab, CR, LF) only; errors lists every field that is wrong, in the order [\"id\", \"hash\"].",
+    "source: env > user > bundled > none. A layer counts only with BOTH fields (null = field absent); the user layer is always a whole pair. The page shows the source and api_id, never api_hash.",
+    "gate: the start-up gate (3.40.2) in front of every login screen (QR login, phone login, add account). has_session = another account is already logged in on this install; since the 2026-10-02 amendment it no longer skips the gate, and the vectors keep it to prove that (the gate function takes no such input). chose_bundled = option 3 picked in this run (Web: this tab's session).",
+    "reminder: 3.40.2 amendment 2026-10-02, after login. source = the source in use (env, user, bundled, none); logged_in = the main screen of an account is up; later_this_run = Later was pressed (or the reminder was already answered) in this run; chose_bundled = option 3 was picked on the gate in this run. expect = whether the set-up page pops up as a modal with Set up now / Later. It pops on every launch while the bundled pair is in use; Later lasts for this run only.",
+    "restore: 3.40.3 restore previous: the previous user setting, else the bundled pair (has_bundled_alternative = bundled exists AND is not the pair that was just rejected), else the gate.",
+    "rejection: server error codes shown on the login screen as SecutgApiRejected {error}: the named ones plus any API_ID_* / API_HASH_* prefix."
+  ],
+  "parse": [
+    {
+      "name": "valid",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef",
+      "expect": {
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "uppercase hash is lowered",
+      "input": "A1Q:12345:0123456789ABCDEF0123456789ABCDEF",
+      "expect": {
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "mixed-case hash is lowered",
+      "input": "A1Q:7:0123456789ABCDEF0123456789abcdef",
+      "expect": {
+        "api_id": 7,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "9-digit id",
+      "input": "A1Q:123456789:0123456789abcdef0123456789abcdef",
+      "expect": {
+        "api_id": 123456789,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "10-digit id at the int32 maximum",
+      "input": "A1Q:2147483647:0123456789abcdef0123456789abcdef",
+      "expect": {
+        "api_id": 2147483647,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "10-digit id above int32",
+      "input": "A1Q:2147483648:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "11-digit id",
+      "input": "A1Q:12345678901:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "id 0",
+      "input": "A1Q:0:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "id with a leading zero",
+      "input": "A1Q:0123:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "negative id",
+      "input": "A1Q:-5:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "hash 31 characters",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcde",
+      "expect": null
+    },
+    {
+      "name": "hash 33 characters",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef0",
+      "expect": null
+    },
+    {
+      "name": "hash with a non-hex character",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdeg",
+      "expect": null
+    },
+    {
+      "name": "wrong prefix",
+      "input": "K1Q:12345:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "lower-case prefix",
+      "input": "a1q:12345:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "surrounding whitespace is trimmed",
+      "input": "  A1Q:12345:0123456789abcdef0123456789abcdef\n",
+      "expect": {
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "whitespace inside a field",
+      "input": "A1Q: 12345:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "whitespace around the hash",
+      "input": "A1Q:12345: 0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "extra field",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef:extra",
+      "expect": null
+    },
+    {
+      "name": "trailing colon",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef:",
+      "expect": null
+    },
+    {
+      "name": "missing hash",
+      "input": "A1Q:12345",
+      "expect": null
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "expect": null
+    },
+    {
+      "name": "tab, CR and LF around are trimmed",
+      "input": "\tA1Q:12345:0123456789abcdef0123456789abcdef\r\n",
+      "expect": {
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "a leading BOM is refused",
+      "input": "\ufeffA1Q:12345:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "a trailing NBSP is refused",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef\u00a0",
+      "expect": null
+    },
+    {
+      "name": "a trailing full-width space U+3000 is refused",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef\u3000",
+      "expect": null
+    },
+    {
+      "name": "a leading NUL is refused",
+      "input": "\u0000A1Q:12345:0123456789abcdef0123456789abcdef",
+      "expect": null
+    },
+    {
+      "name": "a trailing vertical tab is refused",
+      "input": "A1Q:12345:0123456789abcdef0123456789abcdef\u000b",
+      "expect": null
+    }
+  ],
+  "validate": [
+    {
+      "name": "both valid",
+      "api_id": "12345",
+      "api_hash": "0123456789abcdef0123456789abcdef",
+      "expect": {
+        "ok": true,
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "fields are trimmed",
+      "api_id": " 12345 ",
+      "api_hash": " 0123456789abcdef0123456789abcdef ",
+      "expect": {
+        "ok": true,
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "uppercase hash is lowered",
+      "api_id": "12345",
+      "api_hash": "0123456789ABCDEF0123456789ABCDEF",
+      "expect": {
+        "ok": true,
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "bad id",
+      "api_id": "12a45",
+      "api_hash": "0123456789abcdef0123456789abcdef",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "bad hash",
+      "api_id": "12345",
+      "api_hash": "xyz",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "hash"
+        ]
+      }
+    },
+    {
+      "name": "both bad",
+      "api_id": "",
+      "api_hash": "",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "id",
+          "hash"
+        ]
+      }
+    },
+    {
+      "name": "11-digit id",
+      "api_id": "12345678901",
+      "api_hash": "0123456789abcdef0123456789abcdef",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "tab and newline around fields are trimmed",
+      "api_id": "\t12345\n",
+      "api_hash": "\r\n0123456789abcdef0123456789abcdef ",
+      "expect": {
+        "ok": true,
+        "api_id": 12345,
+        "api_hash": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "non-ASCII spaces around fields are refused",
+      "api_id": "12345\u3000",
+      "api_hash": "\u00a00123456789abcdef0123456789abcdef",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "id",
+          "hash"
+        ]
+      }
+    },
+    {
+      "name": "BOM and NUL around fields are refused",
+      "api_id": "\ufeff12345",
+      "api_hash": "0123456789abcdef0123456789abcdef\u0000",
+      "expect": {
+        "ok": false,
+        "errors": [
+          "id",
+          "hash"
+        ]
+      }
+    }
+  ],
+  "build": [
+    {
+      "name": "lower-case hash",
+      "api_id": 12345,
+      "api_hash": "0123456789abcdef0123456789abcdef",
+      "expect": "A1Q:12345:0123456789abcdef0123456789abcdef"
+    },
+    {
+      "name": "upper-case hash is lowered",
+      "api_id": 94575,
+      "api_hash": "0123456789ABCDEF0123456789ABCDEF",
+      "expect": "A1Q:94575:0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "source": [
+    {
+      "name": "env pair beats everything",
+      "layers": {
+        "env": {
+          "api_id": 2,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        },
+        "user": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        },
+        "bundled": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        }
+      },
+      "expect": "env"
+    },
+    {
+      "name": "half an env pair does not count",
+      "layers": {
+        "env": {
+          "api_id": 2,
+          "api_hash": null
+        },
+        "user": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        },
+        "bundled": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        }
+      },
+      "expect": "user"
+    },
+    {
+      "name": "user beats bundled",
+      "layers": {
+        "user": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        },
+        "bundled": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        }
+      },
+      "expect": "user"
+    },
+    {
+      "name": "bundled only",
+      "layers": {
+        "bundled": {
+          "api_id": 1,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        }
+      },
+      "expect": "bundled"
+    },
+    {
+      "name": "half a bundled pair is nothing",
+      "layers": {
+        "bundled": {
+          "api_id": null,
+          "api_hash": "0123456789abcdef0123456789abcdef"
+        }
+      },
+      "expect": "none"
+    },
+    {
+      "name": "nothing",
+      "layers": {},
+      "expect": "none"
+    }
+  ],
+  "gate": [
+    {
+      "name": "no setting, bundled present: gate with option 3",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": true,
+        "has_session": false,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "gate",
+        "shows_bundled_option": true
+      }
+    },
+    {
+      "name": "no setting, no bundled: gate without option 3",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": false,
+        "has_session": false,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "gate",
+        "shows_bundled_option": false
+      }
+    },
+    {
+      "name": "user setting: login",
+      "input": {
+        "has_env": false,
+        "has_user": true,
+        "has_bundled": true,
+        "has_session": false,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "login"
+      }
+    },
+    {
+      "name": "env pair: login",
+      "input": {
+        "has_env": true,
+        "has_user": false,
+        "has_bundled": false,
+        "has_session": false,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "login"
+      }
+    },
+    {
+      "name": "another account logged in, no setting: gate (2026-10-02, no longer skipped)",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": true,
+        "has_session": true,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "gate",
+        "shows_bundled_option": true
+      }
+    },
+    {
+      "name": "option 3 chosen: login",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": true,
+        "has_session": false,
+        "chose_bundled": true
+      },
+      "expect": {
+        "screen": "login"
+      }
+    },
+    {
+      "name": "option 3 chosen but bundled gone: gate",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": false,
+        "has_session": false,
+        "chose_bundled": true
+      },
+      "expect": {
+        "screen": "gate",
+        "shows_bundled_option": false
+      }
+    },
+    {
+      "name": "another account logged in, no setting, no bundled: gate without option 3",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": false,
+        "has_session": true,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "gate",
+        "shows_bundled_option": false
+      }
+    },
+    {
+      "name": "another account logged in, user setting: login",
+      "input": {
+        "has_env": false,
+        "has_user": true,
+        "has_bundled": true,
+        "has_session": true,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "login"
+      }
+    },
+    {
+      "name": "another account logged in, env pair: login",
+      "input": {
+        "has_env": true,
+        "has_user": false,
+        "has_bundled": false,
+        "has_session": true,
+        "chose_bundled": false
+      },
+      "expect": {
+        "screen": "login"
+      }
+    },
+    {
+      "name": "another account logged in, option 3 chosen this run: login",
+      "input": {
+        "has_env": false,
+        "has_user": false,
+        "has_bundled": true,
+        "has_session": true,
+        "chose_bundled": true
+      },
+      "expect": {
+        "screen": "login"
+      }
+    }
+  ],
+  "reminder": [
+    {
+      "name": "bundled, logged in: remind (every launch)",
+      "input": {
+        "source": "bundled",
+        "logged_in": true,
+        "later_this_run": false,
+        "chose_bundled": false
+      },
+      "expect": true
+    },
+    {
+      "name": "bundled, logged in, Later this run: no reminder",
+      "input": {
+        "source": "bundled",
+        "logged_in": true,
+        "later_this_run": true,
+        "chose_bundled": false
+      },
+      "expect": false
+    },
+    {
+      "name": "bundled, logged in, option 3 picked this run: no reminder",
+      "input": {
+        "source": "bundled",
+        "logged_in": true,
+        "later_this_run": false,
+        "chose_bundled": true
+      },
+      "expect": false
+    },
+    {
+      "name": "user setting, logged in: no reminder",
+      "input": {
+        "source": "user",
+        "logged_in": true,
+        "later_this_run": false,
+        "chose_bundled": false
+      },
+      "expect": false
+    },
+    {
+      "name": "env pair, logged in: no reminder",
+      "input": {
+        "source": "env",
+        "logged_in": true,
+        "later_this_run": false,
+        "chose_bundled": false
+      },
+      "expect": false
+    },
+    {
+      "name": "bundled, not logged in: no reminder (the login screen has the gate)",
+      "input": {
+        "source": "bundled",
+        "logged_in": false,
+        "later_this_run": false,
+        "chose_bundled": false
+      },
+      "expect": false
+    },
+    {
+      "name": "nothing, logged in: no reminder",
+      "input": {
+        "source": "none",
+        "logged_in": true,
+        "later_this_run": false,
+        "chose_bundled": false
+      },
+      "expect": false
+    }
+  ],
+  "restore": [
+    {
+      "has_previous": true,
+      "has_bundled_alternative": true,
+      "expect": "previous"
+    },
+    {
+      "has_previous": true,
+      "has_bundled_alternative": false,
+      "expect": "previous"
+    },
+    {
+      "has_previous": false,
+      "has_bundled_alternative": true,
+      "expect": "bundled"
+    },
+    {
+      "has_previous": false,
+      "has_bundled_alternative": false,
+      "expect": "gate"
+    }
+  ],
+  "rejection": [
+    {
+      "error": "API_ID_INVALID",
+      "expect": true
+    },
+    {
+      "error": "API_ID_PUBLISHED_FLOOD",
+      "expect": true
+    },
+    {
+      "error": "API_HASH_INVALID",
+      "expect": true
+    },
+    {
+      "error": "API_ID_SOMETHING_NEW",
+      "expect": true
+    },
+    {
+      "error": "PHONE_NUMBER_INVALID",
+      "expect": false
+    },
+    {
+      "error": "FLOOD_WAIT_30",
+      "expect": false
+    },
+    {
+      "error": "",
+      "expect": false
+    }
+  ]
+}

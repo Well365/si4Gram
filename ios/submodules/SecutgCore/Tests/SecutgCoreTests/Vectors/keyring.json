@@ -1,0 +1,24 @@
+{
+  "master_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+  "master_id": "656300678ffaf08e",
+  "now_ms": 1789128000000,
+  "epoch_days": 1,
+  "label": "20260911",
+  "key_id": "656300678ffaf08e.20260911",
+  "session_key_hex": "db13df479a059c5986430663771e23af7763dd10546ead314817398797e9af97",
+  "kdf_context": "tg-e1-kd",
+  "other_labels": [
+    {
+      "label": "20250101",
+      "session_key_hex": "cc8c145280161f4b921567ac95f7e47e5125bf977e68411d1b1a2bc3d203a4b9"
+    },
+    {
+      "label": "20260912",
+      "session_key_hex": "3a83df7847d53eda26fecacae30cc99c9a3f630f3af5d4b50cf26311f9938fbf"
+    },
+    {
+      "label": "20991231",
+      "session_key_hex": "769e7642e855f2233b516fc1247932b7201f60236d9d0dd0b514738dee4fe490"
+    }
+  ]
+}

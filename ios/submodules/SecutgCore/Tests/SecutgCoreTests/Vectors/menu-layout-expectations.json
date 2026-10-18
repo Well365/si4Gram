@@ -1,0 +1,928 @@
+{
+  "$comment": "PLAN.md 3.49 / secuTG-docs/20261003-锁菜单与设置页显示整理方案.md §4. Shared, client-agnostic contract for the chat lock menu's layout: the first level is always 5 fixed sections (doc §2) and \"更多…\" is always 3 fixed sections (查看/备份/危险) — a section is simply an empty array when nothing in that state qualifies for it. `primary` and `more` list CANONICAL action ids only (see `canonicalIds` below); each client maps its own action objects onto these ids. `danger` is the subset of ids appearing anywhere in `primary`/`more` for that state that must render in the destructive/red style. Deeper lists (手动配对…/备份与搬运…/群密码 chooser) are each client's own concern and are not enumerated here. Web's own ids and section logic: src/secutg/ui/actions.ts (`buildSecutgActions`, `PRIMARY_SECTION_IDS`, `MORE_SECTION_IDS`). 2026-10-03 PLAN 3.50: private chats end 更多… with resetChatLocal (仅在本机重置本聊天的加密) then resetChat (双方一起重置本聊天的加密), both red, on all four clients.",
+  "knownGaps": [],
+  "canonicalIds": {
+    "primary": [
+      "guide",
+      "due",
+      "toggle",
+      "repair",
+      "repairHere",
+      "waiting",
+      "accept",
+      "pair",
+      "safety",
+      "chatKeyShare",
+      "showKey",
+      "manual",
+      "create",
+      "import",
+      "quickShareScan",
+      "inviteOffline",
+      "groupPwSet",
+      "groupPw",
+      "groupPwUnlock",
+      "recreateGroupKey",
+      "keyRequired",
+      "relay",
+      "more"
+    ],
+    "more": [
+      "status",
+      "about",
+      "sponsor",
+      "announce",
+      "transfer",
+      "importManual",
+      "rotate",
+      "unpair",
+      "resetChatLocal",
+      "resetChat"
+    ]
+  },
+  "states": {
+    "private_no_key_no_pairing": {
+      "description": "doc §4.1 — 1v1, no key, nobody has invited anybody yet",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "pair"
+        ],
+        [
+          "manual"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        [
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_invited": {
+      "description": "doc §4.2 — 1v1, this device sent the invite and is waiting",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "invited",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "waiting"
+        ],
+        [
+          "manual"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        [
+          "unpair",
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "unpair",
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_received_invite": {
+      "description": "doc §4.3 — 1v1, the peer's key arrived first; this device has not accepted yet",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "incoming",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "accept"
+        ],
+        [
+          "manual"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        [
+          "unpair",
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "unpair",
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_paired": {
+      "description": "doc §4.4 — 1v1, paired and verified or not (the commonest state)",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "paired",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle",
+          "safety"
+        ],
+        [
+          "chatKeyShare"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer",
+          "importManual"
+        ],
+        [
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_key_changed": {
+      "description": "doc §4.5 — 1v1, the peer's key changed; a pairing already exists",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "key_changed",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle",
+          "repair"
+        ],
+        [
+          "showKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer",
+          "importManual"
+        ],
+        [
+          "unpair",
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "repair",
+        "unpair",
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_other_device": {
+      "description": "doc §4.6 — 1v1, the pairing is on another device of this account",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "other_device",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle",
+          "repairHere"
+        ],
+        [
+          "showKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer",
+          "importManual"
+        ],
+        [
+          "unpair",
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "repairHere",
+        "unpair",
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "private_manual_no_pairing": {
+      "description": "doc §4.7 — 1v1, manual/legacy key with no pairing at all, admin, key due for a change",
+      "flags": {
+        "chatKind": "private",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": true,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle",
+          "due"
+        ],
+        [
+          "showKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer",
+          "importManual"
+        ],
+        [
+          "rotate",
+          "resetChatLocal",
+          "resetChat"
+        ]
+      ],
+      "danger": [
+        "due",
+        "resetChatLocal",
+        "resetChat"
+      ]
+    },
+    "group_no_key_admin": {
+      "description": "doc §4.8 — group, no key yet, Telegram admin",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": true,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [],
+        [
+          "create",
+          "import",
+          "quickShareScan"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    },
+    "group_no_key_member": {
+      "description": "doc §4.8 — group, no key yet, ordinary member (not a Telegram admin)",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [],
+        [
+          "import",
+          "quickShareScan"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    },
+    "group_manual_mode_admin": {
+      "description": "doc §4.9 — group, has a key, 当面配对 (manual) mode, admin (holds the signing key), key due",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": true,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": true,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle",
+          "due"
+        ],
+        [
+          "chatKeyShare",
+          "inviteOffline",
+          "recreateGroupKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": [
+        "due",
+        "recreateGroupKey"
+      ]
+    },
+    "group_manual_mode_member": {
+      "description": "doc §4.9 — group, has a key, 当面配对 (manual) mode, ordinary member",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle"
+        ],
+        [
+          "chatKeyShare",
+          "import",
+          "quickShareScan"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    },
+    "group_auto_mode_admin_no_password": {
+      "description": "doc §4.10 / PLAN 3.49 决定 B — group, has a key, 自动配对 (auto) mode, admin, no group password set yet",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": true,
+        "keyMode": "auto",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle"
+        ],
+        [
+          "chatKeyShare",
+          "groupPwSet",
+          "recreateGroupKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": [
+        "recreateGroupKey"
+      ]
+    },
+    "group_auto_mode_admin_with_password": {
+      "description": "doc §4.10 — group, has a key, 自动配对 (auto) mode, admin, group password already set (PLAN 3.49 决定 B: merged〔群密码 · 已设置〕row)",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": true,
+        "keyMode": "auto",
+        "groupPwActive": true,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle"
+        ],
+        [
+          "chatKeyShare",
+          "groupPw",
+          "recreateGroupKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": [
+        "recreateGroupKey"
+      ]
+    },
+    "group_auto_mode_member": {
+      "description": "doc §4.10 — group, has a key, 自动配对 (auto) mode, ordinary member",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "auto",
+        "groupPwActive": true,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle"
+        ],
+        [
+          "chatKeyShare",
+          "import",
+          "quickShareScan"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor",
+          "announce"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    },
+    "group_legacy_password_locked_admin": {
+      "description": "PLAN.md 3.38.1 LEGACY — group whose only key is a wrapped 3.38.1 record this device has not unlocked yet; legacyLocked coverage",
+      "flags": {
+        "chatKind": "group",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": true,
+        "keyMode": "auto",
+        "groupPwActive": false,
+        "legacyLocked": true,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [],
+        [
+          "import",
+          "quickShareScan",
+          "groupPwSet",
+          "groupPwUnlock",
+          "recreateGroupKey"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor",
+          "announce"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": [
+        "recreateGroupKey"
+      ]
+    },
+    "saved_messages_has_key": {
+      "description": "doc §4.11 — Saved Messages, has a key (this device is the one that created it)",
+      "flags": {
+        "chatKind": "saved",
+        "hasKey": true,
+        "isEncrypted": true,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": true,
+        "isTelegramAdmin": false,
+        "keyMode": "auto",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [
+          "toggle"
+        ],
+        [
+          "chatKeyShare"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    },
+    "saved_messages_no_key": {
+      "description": "doc §4.11 — Saved Messages, no key yet",
+      "flags": {
+        "chatKind": "saved",
+        "hasKey": false,
+        "isEncrypted": false,
+        "pairingState": "none",
+        "verified": false,
+        "isAdmin": false,
+        "isTelegramAdmin": false,
+        "keyMode": "manual",
+        "groupPwActive": false,
+        "legacyLocked": false,
+        "isRekeyDue": false,
+        "hasSponsor": true
+      },
+      "primary": [
+        [
+          "guide"
+        ],
+        [],
+        [
+          "import",
+          "quickShareScan"
+        ],
+        [
+          "keyRequired",
+          "relay"
+        ],
+        [
+          "more"
+        ]
+      ],
+      "more": [
+        [
+          "status",
+          "about",
+          "sponsor"
+        ],
+        [
+          "transfer"
+        ],
+        []
+      ],
+      "danger": []
+    }
+  }
+}

@@ -1,0 +1,311 @@
+import Foundation
+import UIKit
+import Display
+import SwiftSignalKit
+import TelegramCore
+import LegacyComponents
+import TelegramPresentationData
+import ItemListUI
+import PresentationDataUtils
+import OverlayStatusController
+import AccountContext
+import AlertUI
+import PresentationDataUtils
+import UrlHandling
+import AccountUtils
+import PremiumUI
+import StorageUsageScreen
+import SecutgCore // SECUTG-HOOK (PLAN.md 3.53): FaqUrl.validate / distribution.contact
+
+private struct LogoutOptionsItemArguments {
+    let addAccount: () -> Void
+    let setPasscode: () -> Void
+    let clearCache: () -> Void
+    let changePhoneNumber: () -> Void
+    let contactSupport: () -> Void
+    let logout: () -> Void
+}
+
+private enum LogoutOptionsSection: Int32 {
+    case options
+    case logOut
+}
+
+private enum LogoutOptionsEntry: ItemListNodeEntry, Equatable {
+    case alternativeHeader(PresentationTheme, String)
+    case addAccount(PresentationTheme, String, String)
+    case setPasscode(PresentationTheme, String, String)
+    case clearCache(PresentationTheme, String, String)
+    case changePhoneNumber(PresentationTheme, String, String)
+    case contactSupport(PresentationTheme, String, String)
+    case logout(PresentationTheme, String)
+    case logoutInfo(PresentationTheme, String)
+    
+    var section: ItemListSectionId {
+        switch self {
+            case .alternativeHeader, .addAccount, .setPasscode, .clearCache, .changePhoneNumber, .contactSupport:
+                return LogoutOptionsSection.options.rawValue
+            case .logout, .logoutInfo:
+                return LogoutOptionsSection.logOut.rawValue
+        }
+    }
+    
+    var stableId: Int32 {
+        switch self {
+            case .alternativeHeader:
+                return 0
+            case .addAccount:
+                return 1
+            case .setPasscode:
+                return 2
+            case .clearCache:
+                return 3
+            case .changePhoneNumber:
+                return 4
+            case .contactSupport:
+                return 5
+            case .logout:
+                return 6
+            case .logoutInfo:
+                return 7
+        }
+    }
+    
+    static func <(lhs: LogoutOptionsEntry, rhs: LogoutOptionsEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+    
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        let arguments = arguments as! LogoutOptionsItemArguments
+        switch self {
+            case let .alternativeHeader(_, title):
+                return ItemListSectionHeaderItem(presentationData: presentationData, text: title, sectionId: self.section)
+            case let .addAccount(_, title, text):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.deleteAddAccount, title: title, label: text, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.addAccount()
+                })
+            case let .setPasscode(_, title, text):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.permissions, title: title, label: text, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.setPasscode()
+                })
+            case let .clearCache(_, title, text):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.dataAndStorage, title: title, label: text, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.clearCache()
+                })
+            case let .changePhoneNumber(_, title, text):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.changePhoneNumber, title: title, label: text, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.changePhoneNumber()
+                })
+            case let .contactSupport(_, title, text):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.support, title: title, label: text, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
+                    arguments.contactSupport()
+                })
+            case let .logout(_, title):
+                return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                    arguments.logout()
+                })
+            case let .logoutInfo(_, title):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(title), sectionId: self.section)
+        }
+    }
+}
+
+private func logoutOptionsEntries(presentationData: PresentationData, canAddAccounts: Bool, hasPasscode: Bool) -> [LogoutOptionsEntry] {
+    var entries: [LogoutOptionsEntry] = []
+    entries.append(.alternativeHeader(presentationData.theme, presentationData.strings.LogoutOptions_AlternativeOptionsSection))
+    if canAddAccounts {
+        entries.append(.addAccount(presentationData.theme, presentationData.strings.LogoutOptions_AddAccountTitle, presentationData.strings.LogoutOptions_AddAccountText))
+    }
+    if !hasPasscode {
+        entries.append(.setPasscode(presentationData.theme, presentationData.strings.LogoutOptions_SetPasscodeTitle, presentationData.strings.LogoutOptions_SetPasscodeText))
+    }
+    entries.append(.clearCache(presentationData.theme, presentationData.strings.LogoutOptions_ClearCacheTitle, presentationData.strings.LogoutOptions_ClearCacheText))
+    entries.append(.changePhoneNumber(presentationData.theme, presentationData.strings.LogoutOptions_ChangePhoneNumberTitle, presentationData.strings.LogoutOptions_ChangePhoneNumberText))
+    // SECUTG-HOOK (PLAN.md 3.53): hide "contact support" entirely when neither a support contact
+    // nor a FAQ URL is configured in distribution config — there would be nothing to show in the
+    // alert sheet below. An App Store build never shows support/FAQ at all, regardless of config.
+    if !SecutgStoreBuild.isEnabled {
+        let distribution = SecutgConfigHolder.shared.config?.distribution
+        let hasContact = !(distribution?.contact ?? "").isEmpty
+        let hasFaq = FaqUrl.validate(distribution?.faq) != nil
+        if hasContact || hasFaq {
+            entries.append(.contactSupport(presentationData.theme, presentationData.strings.LogoutOptions_ContactSupportTitle, presentationData.strings.LogoutOptions_ContactSupportText))
+        }
+    }
+    entries.append(.logout(presentationData.theme, presentationData.strings.LogoutOptions_LogOut))
+    entries.append(.logoutInfo(presentationData.theme, presentationData.strings.LogoutOptions_LogOutInfo))
+    return entries
+}
+
+public func logoutOptionsController(context: AccountContext, navigationController: NavigationController, canAddAccounts: Bool, phoneNumber: String) -> ViewController {
+    var pushControllerImpl: ((ViewController) -> Void)?
+    var presentControllerImpl: ((ViewController, Any?) -> Void)?
+    var replaceTopControllerImpl: ((ViewController) -> Void)?
+    var dismissImpl: (() -> Void)?
+    
+    let supportPeerDisposable = MetaDisposable()
+    
+    let arguments = LogoutOptionsItemArguments(addAccount: {
+        let _ = (activeAccountsAndPeers(context: context)
+        |> take(1)
+        |> deliverOnMainQueue
+        ).start(next: { accountAndPeer, accountsAndPeers in
+            var maximumAvailableAccounts: Int = 3
+            if accountAndPeer?.1.isPremium == true && !context.account.testingEnvironment {
+                maximumAvailableAccounts = 4
+            }
+            var count: Int = 1
+            for (accountContext, peer, _) in accountsAndPeers {
+                if !accountContext.account.testingEnvironment {
+                    if peer.isPremium {
+                        maximumAvailableAccounts = 4
+                    }
+                    count += 1
+                }
+            }
+            
+            if count >= maximumAvailableAccounts {
+                var replaceImpl: ((ViewController) -> Void)?
+                let controller = PremiumLimitScreen(context: context, subject: .accounts, count: Int32(count), action: {
+                    let controller = PremiumIntroScreen(context: context, source: .accounts)
+                    replaceImpl?(controller)
+                    return true
+                })
+                replaceImpl = { [weak controller] c in
+                    controller?.replace(with: c)
+                }
+                pushControllerImpl?(controller)
+            } else {
+                context.sharedContext.beginNewAuth(testingEnvironment: context.account.testingEnvironment)
+                
+                dismissImpl?()
+            }
+        })
+    }, setPasscode: {
+        let _ = passcodeOptionsAccessController(context: context, pushController: { controller in
+            replaceTopControllerImpl?(controller)
+        }, completion: { _ in
+            replaceTopControllerImpl?(passcodeOptionsController(context: context))
+        }).start(next: { controller in
+            if let controller = controller {
+                pushControllerImpl?(controller)
+            }
+        })
+        dismissImpl?()
+    }, clearCache: {
+        pushControllerImpl?(StorageUsageScreen(context: context, makeStorageUsageExceptionsScreen: { category in
+            return storageUsageExceptionsScreen(context: context, category: category)
+        }))
+        dismissImpl?()
+    }, changePhoneNumber: {
+        let introController = PrivacyIntroController(context: context, mode: .changePhoneNumber(phoneNumber), proceedAction: {
+            replaceTopControllerImpl?(ChangePhoneNumberController(context: context))
+        })
+        pushControllerImpl?(introController)
+        dismissImpl?()
+    }, contactSupport: { [weak navigationController] in
+        // SECUTG-HOOK (PLAN.md 3.53): route via `distribution.contact` / `distribution.faq` from the
+        // bundled secutg.json instead of Telegram's own support peer / FAQ instant-view page, same as
+        // the main settings rows in PeerInfoScreenSettingsActions.swift. Each action is only added when
+        // its field is configured; the row itself is hidden entirely otherwise (see `logoutOptionsEntries`).
+        // An App Store build never shows this (the row is already hidden); guarded again here as a
+        // last line of defence.
+        guard !SecutgStoreBuild.isEnabled else {
+            return
+        }
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        let distribution = SecutgConfigHolder.shared.config?.distribution
+        let faqURL = FaqUrl.validate(distribution?.faq)
+        var contactUsername = (distribution?.contact ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if contactUsername.hasPrefix("@") {
+            contactUsername.removeFirst()
+        }
+
+        var actions: [TextAlertAction] = []
+        if let faqURL {
+            // SECUTG-HOOK (PLAN.md 3.53 补充 ③): the upstream `Settings_FAQ_Button` string names Telegram;
+            // use the Secutg-branded row label instead.
+            actions.append(TextAlertAction(type: .genericAction, title: SecutgL10n.string("SecutgFaqRow"), action: {
+                dismissImpl?()
+                if let navigationController {
+                    context.sharedContext.openExternalUrl(context: context, urlContext: .generic, url: faqURL, forceExternal: false, presentationData: presentationData, navigationController: navigationController, dismissInput: {})
+                }
+            }))
+        }
+        if !contactUsername.isEmpty {
+            actions.append(TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {
+                let controller = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: nil))
+                presentControllerImpl?(controller, nil)
+                supportPeerDisposable.set((context.engine.peers.resolvePeerByName(name: contactUsername, referrer: nil)
+                |> mapToSignal { result -> Signal<EnginePeer?, NoError> in
+                    guard case let .result(result) = result else {
+                        return .complete()
+                    }
+                    return .single(result)
+                }
+                |> deliverOnMainQueue).startStrict(next: { [weak controller] peer in
+                    controller?.dismiss()
+                    if let peer, let navigationController {
+                        dismissImpl?()
+                        context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: .peer(peer)))
+                    }
+                }))
+            }))
+        }
+        guard !actions.isEmpty else {
+            return
+        }
+        // SECUTG-HOOK (PLAN.md 3.53 补充 ③): the upstream `Settings_FAQ_Intro` body text names Telegram and
+        // there is no existing Secutg-branded key for it; drop the body rather than invent one — title/button
+        // only.
+        presentControllerImpl?(textAlertController(context: context, title: nil, text: "", actions: actions), nil)
+    }, logout: {
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        let alertController = textAlertController(context: context, title: presentationData.strings.Settings_LogoutConfirmationTitle, text: presentationData.strings.Settings_LogoutConfirmationText, actions: [
+            TextAlertAction(type: .genericAction, title: presentationData.strings.Common_Cancel, action: {
+            }),
+            TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {
+                let _ = logoutFromAccount(id: context.account.id, accountManager: context.sharedContext.accountManager, alreadyLoggedOutRemotely: false).start()
+                dismissImpl?()
+            })
+        ])
+        presentControllerImpl?(alertController, nil)
+    })
+        
+    let signal = combineLatest(queue: .mainQueue(),
+        context.sharedContext.presentationData,
+        context.sharedContext.accountManager.accessChallengeData()
+    )
+    |> map { presentationData, accessChallengeData -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        var hasPasscode = false
+        switch accessChallengeData.data {
+            case .numericalPassword, .plaintextPassword:
+                hasPasscode = true
+            default:
+                break
+        }
+        
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(presentationData.strings.LogoutOptions_Title), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: logoutOptionsEntries(presentationData: presentationData, canAddAccounts: canAddAccounts, hasPasscode: hasPasscode), style: .blocks)
+        
+        return (controllerState, (listState, arguments))
+    }
+    
+    let controller = ItemListController(context: context, state: signal, tabBarItem: nil)
+    controller.navigationPresentation = .modal
+    pushControllerImpl = { [weak navigationController] value in
+        navigationController?.pushViewController(value, animated: false)
+    }
+    presentControllerImpl = { [weak controller] value, arguments in
+        controller?.present(value, in: .window(.root), with: arguments)
+    }
+    replaceTopControllerImpl = { [weak navigationController] c in
+        navigationController?.replaceTopController(c, animated: true)
+    }
+    dismissImpl = { [weak controller] in
+        let _ = controller?.dismiss()
+    }
+    
+    return controller
+}
+

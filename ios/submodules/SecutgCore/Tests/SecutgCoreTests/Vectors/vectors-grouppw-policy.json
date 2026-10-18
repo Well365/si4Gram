@@ -1,0 +1,270 @@
+{
+  "format": "secutg-grouppw-policy-vectors/1",
+  "spec": "PLAN.md 3.38.2; format documented at the top of src/secutg/grouppw/gp1.ts",
+  "notes": [
+    "policy_on / policy_off: build the payload from the inputs, obfuscate it with obfuscation_nonce_hex (G2 layer, PLAN.md 3.35.8), and the GP1 wire must equal expect.wire byte for byte; parsing expect.wire must give back the inputs.",
+    "kek_hex = crypto_pwhash(32, UTF-8(NFC(password)), salt, ops, mem, ALG_ARGON2ID13); verifier_hex = crypto_generichash(32, UTF-8(\"secutg/grouppw/verify/v1\") || 0x00 || UTF-8(group_id), key = KEK).",
+    "unlock: derive the verifier of password under policy (group_id, salt, ops, mem) and compare to policy.verifier_hex in constant time; the result must equal expect_match.",
+    "payload_parse_fail: the de-obfuscated payload text must be rejected by the strict parser. wire_parse_fail: the whole message must not parse as a GP1 (and must not be adopted)."
+  ],
+  "cases": [
+    {
+      "kind": "policy_on",
+      "name": "plan-3.38.2-vector",
+      "password": "correct horse",
+      "group_id": "-1001234567890",
+      "salt_hex": "000102030405060708090a0b0c0d0e0f",
+      "ops": 2,
+      "mem": 67108864,
+      "at": 1790000000,
+      "publisher_id": "123456789",
+      "obfuscation_nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7",
+      "expect": {
+        "kek_hex": "9aab5a81db651bf866ff7b6169794d2ad9bb00f3d95177925a5fca692a34dbd1",
+        "verifier_hex": "514e5ba3bde3f3ce38806874db3e163601d68de3efa491578de1f3800c3916b4",
+        "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ",
+        "wire": "GP1:-1001234567890:1790000000:oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:123456789"
+      }
+    },
+    {
+      "kind": "policy_on",
+      "name": "nfd-password-cjk-low-params",
+      "password": "café 群密码",
+      "group_id": "-1009876543210",
+      "salt_hex": "101112131415161718191a1b1c1d1e1f",
+      "ops": 1,
+      "mem": 8388608,
+      "at": 1790000060,
+      "publisher_id": "123456789",
+      "obfuscation_nonce_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7",
+      "expect": {
+        "kek_hex": "d70110e34ed383101913d7837749563405954e68025fd3284903e289795dc7ec",
+        "verifier_hex": "735d5906a6eb1ec926c3d884bfcd0c2e72b5bf0d1d6e29d4ca06c915b251a6ee",
+        "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=1&mem=8388608&salt=EBESExQVFhcYGRobHB0eHw&verifier=c11ZBqbrHskmw9iEv80MLnK1vw0dbinUygbJFbJRpu4",
+        "wire": "GP1:-1009876543210:1790000060:wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX9I5YrGt-DL-azmxHv5Sprqw04fF1HTWHvd6A4wl4FSLWMa-_BxAncyIoO6U1GdeHj-Wmlxgimz7tpIDn-QFhCX_TRk8opw-x4tiV6P0JhXjjtm1CwOpWn_636Ue1rSOIuzsi8V-106oh7BiPNoCDef_8gkoc1XwcqDZBjnw5VsjDhsj2f_FZgO2g3g8kjiQFBJVHJV5eJcRY2d0:123456789"
+      }
+    },
+    {
+      "kind": "policy_off",
+      "name": "off",
+      "group_id": "-1001234567890",
+      "at": 1790000120,
+      "publisher_id": "123456789",
+      "obfuscation_nonce_hex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7",
+      "expect": {
+        "payload": "secutg://grouppw?v=1&on=0",
+        "wire": "GP1:-1001234567890:1790000120:4OHi4-Tl5ufo6err7O3u7_Dx8vP09fb3a59sXTFfoqVjuJhh0VHWl7PK6ggQgZqAbF0dSxua0f02ah0tFyNm8Js:123456789"
+      }
+    },
+    {
+      "kind": "unlock",
+      "name": "right",
+      "password": "correct horse",
+      "policy": {
+        "group_id": "-1001234567890",
+        "salt_hex": "000102030405060708090a0b0c0d0e0f",
+        "ops": 2,
+        "mem": 67108864,
+        "verifier_hex": "514e5ba3bde3f3ce38806874db3e163601d68de3efa491578de1f3800c3916b4"
+      },
+      "expect_match": true
+    },
+    {
+      "kind": "unlock",
+      "name": "wrong",
+      "password": "correct horse!",
+      "policy": {
+        "group_id": "-1001234567890",
+        "salt_hex": "000102030405060708090a0b0c0d0e0f",
+        "ops": 2,
+        "mem": 67108864,
+        "verifier_hex": "514e5ba3bde3f3ce38806874db3e163601d68de3efa491578de1f3800c3916b4"
+      },
+      "expect_match": false
+    },
+    {
+      "kind": "unlock",
+      "name": "case",
+      "password": "Correct horse",
+      "policy": {
+        "group_id": "-1001234567890",
+        "salt_hex": "000102030405060708090a0b0c0d0e0f",
+        "ops": 2,
+        "mem": 67108864,
+        "verifier_hex": "514e5ba3bde3f3ce38806874db3e163601d68de3efa491578de1f3800c3916b4"
+      },
+      "expect_match": false
+    },
+    {
+      "kind": "unlock",
+      "name": "wrong-group-same-password",
+      "password": "correct horse",
+      "policy": {
+        "group_id": "-1001234567891",
+        "salt_hex": "000102030405060708090a0b0c0d0e0f",
+        "ops": 2,
+        "mem": 67108864,
+        "verifier_hex": "514e5ba3bde3f3ce38806874db3e163601d68de3efa491578de1f3800c3916b4"
+      },
+      "expect_match": false
+    },
+    {
+      "kind": "unlock",
+      "name": "nfc-equivalent-spelling",
+      "password": "café 群密码",
+      "policy": {
+        "group_id": "-1009876543210",
+        "salt_hex": "101112131415161718191a1b1c1d1e1f",
+        "ops": 1,
+        "mem": 8388608,
+        "verifier_hex": "735d5906a6eb1ec926c3d884bfcd0c2e72b5bf0d1d6e29d4ca06c915b251a6ee"
+      },
+      "expect_match": true
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "wrong-field-order",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&mem=67108864&ops=2&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "extra-field",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ&x=1"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "missing-verifier",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "repeated-field",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "version-2",
+      "payload": "secutg://grouppw?v=2&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "on-2",
+      "payload": "secutg://grouppw?v=1&on=2&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "unknown-kdf",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=scrypt&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "leading-zero-ops",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=02&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "ops-out-of-range",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=11&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "mem-not-kib-multiple",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108865&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "mem-too-large",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=536870912&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "mem-too-small",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=4194304&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "salt-15-bytes",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0O&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "verifier-31-bytes",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5Fg"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "salt-padded",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw==&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "salt-with-standard-alphabet-char",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECA+QFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "salt-noncanonical-trailing-bits",
+      "payload": "secutg://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODx&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "off-with-extra-field",
+      "payload": "secutg://grouppw?v=1&on=0&kdf=argon2id13"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "off-wrong-version",
+      "payload": "secutg://grouppw?v=2&on=0"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "wrong-prefix",
+      "payload": "secutg://key?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "uppercase-scheme",
+      "payload": "SECUTG://grouppw?v=1&on=1&kdf=argon2id13&ops=2&mem=67108864&salt=AAECAwQFBgcICQoLDA0ODw&verifier=UU5bo73j8844gGh02z4WNgHWjePvpJFXjeHzgAw5FrQ"
+    },
+    {
+      "kind": "payload_parse_fail",
+      "name": "empty",
+      "payload": ""
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "positive-chat-id",
+      "wire": "GP1:1001234567890:1790000000:oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:123456789"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "non-numeric-publisher",
+      "wire": "GP1:-1001234567890:1790000000:oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:admin"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "g2-prefix",
+      "wire": "G2:-1001234567890:1790000000:oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:123456789"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "tampered-obfuscated-byte",
+      "wire": "GP1:-1001234567890:1790000000:oKGio6SlpqAoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:123456789"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "payload-not-a-policy",
+      "wire": "GP1:-1001234567890:1790000000:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYFk-qKhNMIO6Va__dvvwAKCYFG2yHsXb853iYVxeu75TF:123456789"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "bad-policy-inside-valid-obfuscation",
+      "wire": "GP1:-1001234567890:1790000000:AgMEBQYHCAkKCwwNDg8QERITFBUWFxgZXyOGPlIU2tyJnpElZgHTmjSBnxGq0odzuJS5ugFkqAIwtP0vHdZ8kV7669oljKMeB5aN3D9ougG490FyexN1N_cGvDxUZCvL4BM90nFyBPtlKwBslzbAm0n3xGG-QF0AuwZGH1EhOoDHwOh8WuYsZcps6rOa4h_vStMo7DnenfKlT2E-cR-wSOajqRvsdp0RT9LrzWrw3YAwb2QOBQ:123456789"
+    },
+    {
+      "kind": "wire_parse_fail",
+      "name": "trailing-colon",
+      "wire": "GP1:-1001234567890:1790000000:oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3EqnRmObQUcJRqIV3_tZPZWPVSv-eQeTSXTfcuDBxKacimwpOOxXzgYycm6jneKiuDT1-_WxWGA8zMrggi7RASaqWMqAmX1dPVnpWfXgtHxtExzNcvdqttg4JUkQTTH7o2g8hqwzf8ZD6UKFL3IhYJFpPXjJmmgw72n4i_1vblB61n-viJmCH2mz9xlOPsFZWKcn0Ywy-lce32DnT:123456789:"
+    }
+  ]
+}

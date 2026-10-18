@@ -1,0 +1,118 @@
+{
+  "$comment": "v1.4 §22's shared JSON test vectors (\"五端共用逻辑规范和同一组 JSON 测试向量\" — PLAN.md 3.12's own principle applied here to §22 rather than to UI text). Scope: only K01 and W01, the two §22 rows that are single-shot protocol-primitive checks with no multi-device orchestration, are ported to this literal format in this slice — see failure-matrix.ts for how the other 18 rows are covered by the existing imperative TDD suites instead, and qa/vectors.test.ts's module doc for why byte-exact ciphertext/signature reproduction (v1.4 §22's own \"随机...都可注入，以重现\") is NOT attempted here: it would need buildK2File/buildW2Event to accept injected randomness, which they do not today, and retrofitting that is a separate, larger change than authoring vectors. Each vector's fixed test key material (\"固定的测试私钥只用于测试\") is below; every field name matches v1.4 §22's own initial_state/input_events/expected_state/expected_effects/expected_errors. This exact file is a byte-for-byte copy of the Web reference's src/secutg/v2/qa/vectors.json — a literal cross-platform shared artifact, not re-derived.",
+  "vectors": [
+    {
+      "id": "K01",
+      "family": "K2",
+      "input": "K2 错码、篡改、超限",
+      "expected_result": "无部分写入；错误一致",
+      "initial_state": {
+        "carry_secret_b64url": "5xjEUBBg0Dn6s3Q_mkhHycmDQncz_-qThuKrwsDJRKI",
+        "payload": {
+          "exportId": "qa-vector-k01",
+          "sourceDisplayName": "qa-vector-device",
+          "createdMs": "1700000000000",
+          "scope": "history_only",
+          "keyRecords": [],
+          "permissions": ["read_history"]
+        }
+      },
+      "input_events": [
+        { "op": "build_then_decrypt", "variant": "correct_secret" },
+        { "op": "build_then_decrypt", "variant": "wrong_secret" },
+        { "op": "build_then_decrypt", "variant": "corrupted_ciphertext" },
+        { "op": "decrypt_raw", "variant": "garbage_json", "raw": "not even json" }
+      ],
+      "expected_state": "no partial writes possible — decryptK2File is pure, has no persistent side effects to roll back",
+      "expected_effects": [
+        { "variant": "correct_secret", "ok": true },
+        { "variant": "wrong_secret", "ok": false },
+        { "variant": "corrupted_ciphertext", "ok": false },
+        { "variant": "garbage_json", "ok": false }
+      ],
+      "expected_errors": [
+        { "variant": "wrong_secret", "reason": "invalid" },
+        { "variant": "corrupted_ciphertext", "reason": "invalid" },
+        { "variant": "garbage_json", "reason": "invalid" }
+      ]
+    },
+    {
+      "id": "W01",
+      "family": "W2",
+      "input": "重复、过期、非目标 W2",
+      "expected_result": "不擦除；记录明确错误",
+      "initial_state": {
+        "account": "qa-vector-account",
+        "issuer_pk_b64url": "uwY9QqVfKea50LJtZuyQ4yUGkPiWkjqwXYEYm2By6dI",
+        "issuer_sk_b64url": "16u7Q2sl2d7LF5ceumzObLEhWl3XnM2jfOpLEemUp427Bj1CpV8p5rnQsm1m7JDjJQaQ-JaSOrBdgRibYHLp0g",
+        "target_device": "GZN2YoDWp1PONf8MkQjcj8pcEe9OKdZEkPr14GuWmFg",
+        "allowed_scope": ["wipe_all"],
+        "issued_at_ms": 1700000000000,
+        "expires_at_ms": 1700003600000
+      },
+      "input_events": [
+        { "op": "handle", "variant": "first_delivery" },
+        { "op": "handle", "variant": "duplicate_delivery" },
+        { "op": "handle", "variant": "expired", "now_ms": 1700100000000 },
+        { "op": "handle", "variant": "not_a_target", "as_device": "aWtAWD2J_XfQIQPwAx7OBxwfFAVqhaVmbSqbjjN_sH4" }
+      ],
+      "expected_state": "no local wipe execution follows any of these outcomes — w2.ts never performs one",
+      "expected_effects": [
+        { "variant": "first_delivery", "kind": "auto_execute" },
+        { "variant": "duplicate_delivery", "kind": "already_processed" }
+      ],
+      "expected_errors": [
+        { "variant": "expired", "reason": "expired" },
+        { "variant": "not_a_target", "reason": "not_a_target" }
+      ]
+    },
+    {
+      "id": "K02",
+      "family": "K2",
+      "input": "旧备份或同 id 不同钥",
+      "expected_result": "不回滚；冲突拒绝",
+      "initial_state": {
+        "binding_id": "qa-vector-k02-binding",
+        "epoch": 1,
+        "current_master_fill_byte": 9,
+        "imports": [
+          { "variant": "stale_conflicting", "master_fill_byte": 1 },
+          { "variant": "matches_current", "master_fill_byte": 9 }
+        ]
+      },
+      "input_events": [
+        { "op": "merge", "variant": "stale_conflicting" },
+        { "op": "merge", "variant": "matches_current" }
+      ],
+      "expected_state": "the CURRENT record (fill byte 9) is never overwritten by either import attempt",
+      "expected_effects": [
+        { "variant": "matches_current", "outcome": "alreadyPresent" }
+      ],
+      "expected_errors": [
+        { "variant": "stale_conflicting", "reason": "conflicts_with_current_state" }
+      ]
+    },
+    {
+      "id": "K03",
+      "family": "K2",
+      "input": "完整身份恢复",
+      "expected_result": "旧管理权限不自动激活",
+      "initial_state": {
+        "carry_secret_b64url": "5xjEUBBg0Dn6s3Q_mkhHycmDQncz_-qThuKrwsDJRKI",
+        "identity_sk_b64url": "16u7Q2sl2d7LF5ceumzObLEhWl3XnM2jfOpLEemUp427Bj1CpV8p5rnQsm1m7JDjJQaQ-JaSOrBdgRibYHLp0g",
+        "encapsulation_sk_b64url": "5xjEUBBg0Dn6s3Q_mkhHycmDQncz_-qThuKrwsDJRKI"
+      },
+      "input_events": [
+        { "op": "build_then_decrypt_then_import", "variant": "correct_secret" },
+        { "op": "build_then_decrypt", "variant": "wrong_secret" }
+      ],
+      "expected_state": "the imported result carries only identitySk/encapsulationSk/keyRecords — no field exists that could mark a binding verified or grant group admin_acl membership",
+      "expected_effects": [
+        { "variant": "correct_secret", "ok": true, "result_fields": ["identitySk", "encapsulationSk", "keyRecords"] }
+      ],
+      "expected_errors": [
+        { "variant": "wrong_secret", "reason": "invalid" }
+      ]
+    }
+  ]
+}

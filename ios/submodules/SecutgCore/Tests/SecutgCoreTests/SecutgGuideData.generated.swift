@@ -1,0 +1,1 @@
+../../../TelegramCore/Sources/Secutg/SecutgGuideData.generated.swift

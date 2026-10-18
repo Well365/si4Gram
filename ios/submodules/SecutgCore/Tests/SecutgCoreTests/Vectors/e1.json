@@ -1,0 +1,35 @@
+{
+  "key_id": "656300678ffaf08e.20260911",
+  "session_key_hex": "db13df479a059c5986430663771e23af7763dd10546ead314817398797e9af97",
+  "cases": [
+    {
+      "text": "hello, world",
+      "wire": "E1:656300678ffaf08e.20260911:jA7aTCvnsMbxGkkOh2STLxXjurksHuAs:gi2WWO4t_o2JsR_1Rh8Jy5gP_IIvO62xy_CsBofdnDNOVt9vfOSzkn76"
+    },
+    {
+      "text": "bold link 😀 tail 中文",
+      "entities": [
+        {
+          "type": "MessageEntityBold",
+          "offset": 0,
+          "length": 4
+        },
+        {
+          "type": "MessageEntityTextUrl",
+          "offset": 5,
+          "length": 4,
+          "url": "https://secutg.test"
+        }
+      ],
+      "wire": "E1:656300678ffaf08e.20260911:daSdwXmaZIGu0ZBrLtt7UACTAQGyKFFE:5L6FoNqp8J7MBumcmWhekk0RBQkzCc1vCcqVR-jBTGXWAEM73lIerzeRsLC8EtIrTWoe5mjgF8uB6eTWG6mCySLMtlJR6POqFIcIUVzaewmqALv3-MLx3LNZzgMouog9DQXrVHjDKMehShnSj4_zHzH19tRKkUvhnDViMr6EfpT0yIPKIw0Vqj1lvME58Lr3tq8e2W1jf3XXsIjLtu9cnjJ9_URISMplfIbvZSfK-upNzUNRtQZ2nhxb9My9XqLuaXNH"
+    },
+    {
+      "text": "",
+      "wire": "E1:656300678ffaf08e.20260911:lwjgw0F1pnRceRQ_Hj2ILFFw7jQjJsaJ:P_1fp8KKbRUcQe7j44H49O0stqhdpuZqeBbWaRVW"
+    }
+  ],
+  "tampered": {
+    "wire": "E1:656300678ffaf08e.20260911:lDrJgzZ1DpXmiF5zlW7KYZ7okUjmFm8k:6EQ-nLkmvfAvgSVKMXFBBq3Em9pqAuBQtpodCgeLAWJ4dC_B",
+    "flipped": "E1:656300678ffaf08e.20260911:lDrJgzZ1DpXmiF5zlW7KYZ7okUjmFm8k:6EQ-nAkmvfAvgSVKMXFBBq3Em9pqAuBQtpodCgeLAWJ4dC_B"
+  }
+}

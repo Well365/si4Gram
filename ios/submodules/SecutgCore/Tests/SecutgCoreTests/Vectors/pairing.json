@@ -1,0 +1,15 @@
+{
+  "pair_context": "tg-e1-pair-v1",
+  "safety_context": "tg-e1-safety-v1",
+  "a_x25519_sk_hex": "05101b26313c47525d68737e89949faab5c0cbd6e1ecf7020d18232e39444f5a",
+  "a_x25519_pk_hex": "14ee0e07f34e3a17030c6eecf66d3705e80d1e153f7a0ca5b345e83ce9d62643",
+  "b_x25519_sk_hex": "c8c5c2bfbcb9b6b3b0adaaa7a4a19e9b9895928f8c898683807d7a7774716e6b",
+  "b_x25519_pk_hex": "36d6b4567333d248860d3aa36e4bd1a0cc3d5ab570c378c58133a85c43bd9d14",
+  "master_hex": "4bea640613596cc7df92a64a397a9b0aeda1e7a4e9610443f6a1b0d987d88fdf",
+  "master_id": "aab20b551be9f17c",
+  "safety_code": "4145 8544 3189",
+  "ratchet_context": "tg-e1-ratchet-v1",
+  "ratchet_base_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+  "ratchet_next_hex": "044b7bf6113768030184f1f4207f98f968131782efdcaff8b2344c293dbb7691",
+  "ratchet_next_master_id": "90c70f756a1fff5e"
+}

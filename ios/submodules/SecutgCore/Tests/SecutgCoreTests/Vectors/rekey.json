@@ -1,0 +1,17 @@
+{
+  "admin_ed25519_pk_b64": "5An-eLoVwfCoFEghSA9NqOduC7fuLsddRAI-62ES1x8",
+  "old_master_hex": "fffaf5f0ebe6e1dcd7d2cdc8c3beb9b4afaaa5a09b96918c87827d78736e6964",
+  "new_master_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+  "member_user_id": "200",
+  "member_x25519_pk_hex": "95b2e19f5a5f14dce7e269c4811f751ebe0f9d82cedeb9310b8aa368dfe00871",
+  "member_x25519_sk_hex": "6e630e24a536a0bc8428d2c1bc946d80037bc5902c2459bdaa0caf3a24a38344",
+  "newcomer_user_id": "300",
+  "newcomer_x25519_pk_hex": "719e493a87e1ba4ebb3653e68b2512bc144955e486ec0036681e56d31dacb619",
+  "newcomer_x25519_sk_hex": "d449ec015fb04a60ba123e297cd4e16a2fd3baf6fe068dd2569778e64ee573db",
+  "rotate": "R1:rotate:656300678ffaf08e.20260911:GrwabAbSuNVGJQ1fl3IiEd5yRuQCoj0j69iBPgOC0uYj57ApwOA3tTfMavH8dHEQzk2h5kmL1Bp0VrQLL743qTJAn4tiUoRB:1NKYxHhwe83Cw-5-JfKhoDBzTkIwU9F82zek7Q0ioUtiSv5IZ1LnpAno9Qa4s4Vpjm5pNnbxWeHQnDL9gmyACw",
+  "reset": "R1:reset:656300678ffaf08e.20260911:eyIyMDAiOiJyN0J4U1VKVS1wbi13cVJxcExWUGhlNjlLQUM1bTJ2VlZuMzdoMzJBMURpR1d4UHJIaXRLUkF5ZWlweFRXNDZ3TlMyMUQ5QnhwakNqenZsUDBibEQxbHJQNG9yMlRSMm5LNm9aVllqR1hzRSJ9:c7V0LLsrL60hHoSFR_FeLaSkvaqMofwi9gWP0fUzbAizsHFb5mOocRx9CiY3Zjm8h5d-WxfxfIKUVBQCHK5qCg",
+  "welcome": "R1:welcome:656300678ffaf08e.20260911:B9aKNJWFAxxGh4RCkFP3M_zgGA2BaKY5MY-B3kgmFnYFL2ZidYv3VKwFQE2yAyw4TS3PL46Hz-Ea8NJ2WjxpNKO4HFmvJixd7mRwN7t3u6w:t4PoSNV9llHCHMxeCNNLkgurqOaCwpgy10EDk4rkf2vJD1UQyN1KH-GnafPximb7OwpQIBCCcbc4Qb2eCdydCQ",
+  "p1": "P1:200:lbLhn1pfFNzn4mnEgR91Hr4PnYLO3rkxC4qjaN_gCHE:51QDd30mYEIyFET-wNhEfFh-rvuu0rmcPjGC2vC9bbw:qvPSFAvqbpHk5VRma3LBgKIT-gMiqDF_UaKLTtTjs5PMR5H71_3xBp9vBGr0BMZyV2xHyl0dt5AhdAc5Z7IMAw",
+  "p1_user_id": "200",
+  "p1_ed25519_pk_hex": "e75403777d266042321444fec0d8447c587eaefbaed2b99c3e3182daf0bd6dbc"
+}

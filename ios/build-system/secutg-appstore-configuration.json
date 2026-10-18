@@ -1,0 +1,15 @@
+{
+    "bundle_id": "com.si4key.si4gram",
+    "api_id": "{! get one at https://my.telegram.org/apps !}",
+    "api_hash": "{! get one at https://my.telegram.org/apps !}",
+    "team_id": "X855Y85A4V",
+    "app_center_id": "0",
+    "is_internal_build": "false",
+    "is_appstore_build": "false",
+    "appstore_id": "0",
+    "app_specific_url_scheme": "tg",
+    "premium_iap_product_id": "",
+    "enable_siri": false,
+    "enable_icloud": false,
+    "app_group": "group.share.secure.simpleKey"
+}

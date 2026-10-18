@@ -1,0 +1,5678 @@
+{
+  "format": "secutg-security-audit-vectors/1",
+  "spec": "PLAN.md 3.46; implemented in src/secutg/audit/securityAudit.ts (runSecurityAudit)",
+  "schema": {
+    "run": "run(snapshot, now_ms, ignored) -> findings. Pure: no clock, no storage, no network. Neither the snapshot nor the findings are stored or logged.",
+    "snapshot": {
+      "chats": "array of chat entries (any order). One entry per chat this device knows anything encrypted about.",
+      "chats[].chatId": "string, the client's own chat id (Web: user id for 1v1, \"-…\" for groups).",
+      "chats[].kind": "\"private\" | \"group\" | \"saved\" (Saved Messages).",
+      "chats[].pairing": "\"none\" | \"paired\" | \"waiting\" (own invite sent, unanswered) | \"conflict\" (another device of this account holds the pairing, 搁置) | \"suspended\" (sending paused while a replacement key is set up, 挂起) | \"mismatch\" (safety codes differ, sending blocked) | \"mismatch_override\" (differ, user chose to keep sending). v2 binding first, then v2 transaction, then v1 pairing.",
+      "chats[].verified": "bool, the current pairing's safety code was confirmed.",
+      "chats[].inviteReceived": "bool, an incoming pairing invite is waiting for an answer.",
+      "chats[].keyChangedInvite": "bool, an unanswered incoming invite from an identity the current binding has never seen (3.43; v1 key_changed).",
+      "chats[].hasKey": "bool, the chat holds a usable send key right now.",
+      "chats[].groupKeyCreatedMs": "int ms | null, group only: when the current group key was made/received; null = unknown.",
+      "chats[].groupPasswordActive": "bool, group only (3.38): the group password policy is on.",
+      "chats[].groupPasswordUnlocked": "bool, group only: unlocked in this run.",
+      "chats[].keyRequired": "bool | null (3.41): null = the chat never had the \"refuse to send without a key\" switch (never encrypted), else whether it is on.",
+      "chats[].plaintextOnDisk": "bool (3.19/3.44): older history of this encrypted chat is still stored as plain text.",
+      "chats[].cloned": "bool (3.39.13): the chat's key came from a V2Q clone — another device shares this chat's identity.",
+      "settings.groupKeyMaxAgeDays": "int N for check 3, default 90, adjustable on the page; <= 0 means default.",
+      "settings.localCiphertext": "bool, the 3.19 switch.",
+      "settings.wipePhraseSet": "bool, a custom wipe phrase is set (3.22; the built-in one always exists).",
+      "settings.wipeListens": "bool, this device acts on a wipe phrase in Saved Messages (3.16 rule 8).",
+      "settings.netGateEnabled": "bool, the 3.37 online gate (Web: always true, it has no switch).",
+      "settings.apiCredentialSource": "\"env\" | \"user\" | \"bundled\" | \"none\" (3.40.1).",
+      "backup.lastBackupMs": "int ms | null: last full key export/backup this device made; null = never.",
+      "backup.lastKeyChangeMs": "int ms | null: newest key this device received or made (any chat).",
+      "version.own": "string | null, dotted numeric version of this app.",
+      "version.newestPeerSeen": "string | null, newest secuTG version inferred from local data only; null = unknown (no finding).",
+      "assistant": "null everywhere but macOS (no check 11 finding). macOS: { enabled, dataDir, serveConnected, unconfirmedEvents }.",
+      "account": "optional (PLAN.md 3.46.2); missing entirely is the same as every field being null. Read from Telegram when the page opens (account.getPassword has_password, account.getAuthorizations count excluding this device), never from local state, and never written anywhere.",
+      "account.twoStepPassword": "bool | null, check 12: has a two-step verification password set; null = could not be read, no finding.",
+      "account.otherSessions": "int | null, check 13: other devices signed in to this account (this device excluded); null = could not be read, no finding."
+    },
+    "ignored": "object finding id -> ms when the user pressed Ignore. Hidden while now_ms - at < 30 days (2592000000 ms); at exactly 30 days it is back. ok findings are never hidden. Stored locally only.",
+    "finding": {
+      "id": "\"c<check>:<chatId or ->:<reason>\" — stable, so ignoring survives a re-check; a different reason (e.g. warn->risk) is a different id and re-surfaces.",
+      "check": "int 1..13",
+      "level": "\"risk\" | \"warn\" | \"ok\"",
+      "chatId": "present only for per-chat findings",
+      "params": "always has \"reason\"; the rest are the sentence placeholders (days, limit, count, version, peer, dir, serveConnected).",
+      "action": "\"openChat\" | \"openSafetyCode\" | \"openLockMenu\" | \"openLocalCiphertext\" | \"openBackup\" | \"openApiCredentials\" | \"openWipeSettings\" | \"openAssistant\" | \"openTwoStep\" | \"openSessions\" | \"none\""
+    },
+    "sort": "risk, warn, ok; then check ascending; then chatId by UTF-16 code units with \"no chat\" (empty) first; then id the same way.",
+    "rules": [
+      "1 (private chats): risk keyChanged (keyChangedInvite) > risk mismatch > warn invite (inviteReceived) > warn suspended > warn conflict > ok paired (paired or mismatch_override). waiting/none: no finding.",
+      "2 (private chats): risk mismatchOverride; paired/suspended: ok verified or warn unverified; anything else no finding.",
+      "3 (groups with hasKey or groupPasswordActive): days = floor((now - groupKeyCreatedMs)/86400000) when known. risk keyVeryOld days > 2N {days, limit}; warn keyOld days > N {days, limit}; warn passwordLocked (active and not unlocked) {limit}; else ok fresh {limit}.",
+      "4 (any chat with keyRequired != null): ok on; warn offWithKey; risk offNoKey.",
+      "5 (always one): risk off; warn plaintextHistory {count = chats with plaintextOnDisk}; ok on.",
+      "6: warn cloned per cloned chat; no cloned chat: one ok none (action none). No risk level: the state is a fact to remember, not a fault.",
+      "7 (only when some chat hasKey): risk never; warn stale (lastBackupMs < lastKeyChangeMs); ok current.",
+      "8: ok user; warn env; risk bundled; none: no finding.",
+      "9 (always one): risk notListening; risk netGateOff; warn noCustomPhrase; ok ready.",
+      "10 (only when both versions known): dotted numeric compare (missing or non-numeric parts = 0). own >= peer ok current; behind with the same major warn behind; lower major risk majorBehind. params {version, peer}, action none.",
+      "11 (assistant != null): ok off; warn on; risk unconfirmed (unconfirmedEvents > 0). params {dir, serveConnected, count}.",
+      "12 (account.twoStepPassword != null): ok on (true); risk off (false). No warn level.",
+      "13 (account.otherSessions != null): ok none (0); warn others (>= 1) {count}. No risk level."
+    ],
+    "strings": "Title SecutgAuditCheck<N>Title; sentence SecutgAuditCheck<N><Risk|Warn|Ok> with params as placeholders; summary SecutgAuditSummary {risk} {warn} {ok}."
+  },
+  "notes": [
+    "Every check 1-13 has at least one ok, warn and risk case except check 6 (no risk level by design), check 12 (no warn level by design) and check 13 (no risk level by design). Levels covered: 10:ok 10:risk 10:warn 11:ok 11:risk 11:warn 12:ok 12:risk 13:ok 13:warn 1:ok 1:risk 1:warn 2:ok 2:risk 2:warn 3:ok 3:risk 3:warn 4:ok 4:risk 4:warn 5:ok 5:risk 5:warn 6:ok 6:warn 7:ok 7:risk 7:warn 8:ok 8:risk 8:warn 9:ok 9:risk 9:warn.",
+    "expect is the full, sorted output for that case.",
+    "Checks 12/13 (PLAN.md 3.46.2) were added after the other checks; every pre-existing case predates the `account` field, has no `account` key, and keeps the same `expect` (checks 12/13 stay silent) — this is also exactly the 'account field absent' case the port tests require."
+  ],
+  "cases": [
+    {
+      "name": "baseline: nothing encrypted yet",
+      "covers": [
+        "5:ok",
+        "6:ok",
+        "8:ok",
+        "9:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "1 ok: paired private chat",
+      "covers": [
+        "1:ok",
+        "2:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "100",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c2:100:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "100",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:100:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "100",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "1 warn: an incoming invite is waiting",
+      "covers": [
+        "1:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "101",
+            "kind": "private",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": true,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c1:101:invite",
+            "check": 1,
+            "level": "warn",
+            "chatId": "101",
+            "action": "openChat",
+            "params": {
+              "reason": "invite"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "1 warn: suspended (挂起)",
+      "covers": [
+        "1:warn",
+        "2:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "102",
+            "kind": "private",
+            "pairing": "suspended",
+            "verified": true,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c1:102:suspended",
+            "check": 1,
+            "level": "warn",
+            "chatId": "102",
+            "action": "openChat",
+            "params": {
+              "reason": "suspended"
+            }
+          },
+          {
+            "id": "c2:102:verified",
+            "check": 2,
+            "level": "ok",
+            "chatId": "102",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "verified"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "1 warn: another device holds the pairing (搁置)",
+      "covers": [
+        "1:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "103",
+            "kind": "private",
+            "pairing": "conflict",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c1:103:conflict",
+            "check": 1,
+            "level": "warn",
+            "chatId": "103",
+            "action": "openChat",
+            "params": {
+              "reason": "conflict"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "1 risk: safety codes did not match, sending blocked",
+      "covers": [
+        "1:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "104",
+            "kind": "private",
+            "pairing": "mismatch",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c1:104:mismatch",
+            "check": 1,
+            "level": "risk",
+            "chatId": "104",
+            "action": "openChat",
+            "params": {
+              "reason": "mismatch"
+            }
+          },
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "1 risk: key-changed invite outranks everything else (3.43)",
+      "covers": [
+        "1:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "105",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": true,
+            "inviteReceived": true,
+            "keyChangedInvite": true,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c1:105:keyChanged",
+            "check": 1,
+            "level": "risk",
+            "chatId": "105",
+            "action": "openChat",
+            "params": {
+              "reason": "keyChanged"
+            }
+          },
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c2:105:verified",
+            "check": 2,
+            "level": "ok",
+            "chatId": "105",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "verified"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "1 none: own invite waiting, groups and Saved Messages are not paired chats",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "106",
+            "kind": "private",
+            "pairing": "waiting",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          },
+          {
+            "chatId": "-200",
+            "kind": "group",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          },
+          {
+            "chatId": "999",
+            "kind": "saved",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "2 ok: verified",
+      "covers": [
+        "1:ok",
+        "2:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "110",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": true,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c1:110:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "110",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c2:110:verified",
+            "check": 2,
+            "level": "ok",
+            "chatId": "110",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "verified"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 6
+        }
+      }
+    },
+    {
+      "name": "2 warn: never compared",
+      "covers": [
+        "1:ok",
+        "2:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "111",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c2:111:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "111",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:111:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "111",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "2 risk: mismatch, kept sending anyway",
+      "covers": [
+        "1:ok",
+        "2:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "112",
+            "kind": "private",
+            "pairing": "mismatch_override",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c2:112:mismatchOverride",
+            "check": 2,
+            "level": "risk",
+            "chatId": "112",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "mismatchOverride"
+            }
+          },
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c1:112:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "112",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "3 ok: recent group key",
+      "covers": [
+        "3:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-300",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1789136000000,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-300:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-300",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "3 ok: age unknown is not a finding of age",
+      "covers": [
+        "3:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-301",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-301:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-301",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "3 ok: exactly N days old is still within the limit",
+      "covers": [
+        "3:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-302",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1782224000000,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-302:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-302",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "3 warn: older than N (90)",
+      "covers": [
+        "3:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-303",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1782137600000,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-303:keyOld",
+            "check": 3,
+            "level": "warn",
+            "chatId": "-303",
+            "action": "openChat",
+            "params": {
+              "reason": "keyOld",
+              "days": 91,
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "3 warn: N adjusted on the page (30)",
+      "covers": [
+        "3:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-304",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1787321600000,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 30,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-304:keyOld",
+            "check": 3,
+            "level": "warn",
+            "chatId": "-304",
+            "action": "openChat",
+            "params": {
+              "reason": "keyOld",
+              "days": 31,
+              "limit": 30
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "3 warn: group password on but locked this run, even with no usable key",
+      "covers": [
+        "3:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-305",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": true,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c3:-305:passwordLocked",
+            "check": 3,
+            "level": "warn",
+            "chatId": "-305",
+            "action": "openChat",
+            "params": {
+              "reason": "passwordLocked",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "3 risk: more than twice N",
+      "covers": [
+        "3:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-306",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1774361600000,
+            "groupPasswordActive": true,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c3:-306:keyVeryOld",
+            "check": 3,
+            "level": "risk",
+            "chatId": "-306",
+            "action": "openChat",
+            "params": {
+              "reason": "keyVeryOld",
+              "days": 181,
+              "limit": 90
+            }
+          },
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "3 none: a group without any key",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-307",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "4 ok: switch on",
+      "covers": [
+        "4:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-400",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": true,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c4:-400:on",
+            "check": 4,
+            "level": "ok",
+            "chatId": "-400",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "4 warn: switch off, key present",
+      "covers": [
+        "3:ok",
+        "4:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-401",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": false,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c4:-401:offWithKey",
+            "check": 4,
+            "level": "warn",
+            "chatId": "-401",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "offWithKey"
+            }
+          },
+          {
+            "id": "c3:-401:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-401",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 1,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "4 risk: was encrypted, no key now, switch off",
+      "covers": [
+        "4:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "402",
+            "kind": "saved",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": false,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c4:402:offNoKey",
+            "check": 4,
+            "level": "risk",
+            "chatId": "402",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "offNoKey"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "4 none: never encrypted",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "403",
+            "kind": "private",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "5 warn: on, but older plaintext history remains",
+      "covers": [
+        "5:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "500",
+            "kind": "private",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": true,
+            "cloned": false
+          },
+          {
+            "chatId": "-501",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": true,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:plaintextHistory",
+            "check": 5,
+            "level": "warn",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "plaintextHistory",
+              "count": 2
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "5 risk: switch off",
+      "covers": [
+        "5:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": false,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:off",
+            "check": 5,
+            "level": "risk",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "off"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "6 warn: one finding per cloned chat (no \"none\" ok then)",
+      "covers": [
+        "6:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "600",
+            "kind": "private",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": true
+          },
+          {
+            "chatId": "601",
+            "kind": "private",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": true
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c6:600:cloned",
+            "check": 6,
+            "level": "warn",
+            "chatId": "600",
+            "action": "openChat",
+            "params": {
+              "reason": "cloned"
+            }
+          },
+          {
+            "id": "c6:601:cloned",
+            "check": 6,
+            "level": "warn",
+            "chatId": "601",
+            "action": "openChat",
+            "params": {
+              "reason": "cloned"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 2,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "7 none: nothing to back up",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-700",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "7 risk: keys never backed up",
+      "covers": [
+        "7:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-701",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c3:-701:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-701",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "7 warn: backup older than the newest key",
+      "covers": [
+        "7:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-702",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": 1789568000000,
+          "lastKeyChangeMs": 1789827200000
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:stale",
+            "check": 7,
+            "level": "warn",
+            "action": "openBackup",
+            "params": {
+              "reason": "stale"
+            }
+          },
+          {
+            "id": "c3:-702:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-702",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "7 ok: backup after the newest key",
+      "covers": [
+        "7:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-703",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": 1789913600000,
+          "lastKeyChangeMs": 1789827200000
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c3:-703:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-703",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c7:-:current",
+            "check": 7,
+            "level": "ok",
+            "action": "openBackup",
+            "params": {
+              "reason": "current"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 6
+        }
+      }
+    },
+    {
+      "name": "7 ok: backed up, key change time unknown",
+      "covers": [
+        "7:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "-704",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": 1789913600000,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c3:-704:fresh",
+            "check": 3,
+            "level": "ok",
+            "chatId": "-704",
+            "action": "openChat",
+            "params": {
+              "reason": "fresh",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c7:-:current",
+            "check": 7,
+            "level": "ok",
+            "action": "openBackup",
+            "params": {
+              "reason": "current"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 6
+        }
+      }
+    },
+    {
+      "name": "8 warn: env",
+      "covers": [
+        "8:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "env"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c8:-:env",
+            "check": 8,
+            "level": "warn",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "env"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "8 risk: bundled",
+      "covers": [
+        "8:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "8 none: no credentials at all",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "none"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "9 warn: built-in phrase only",
+      "covers": [
+        "9:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": false,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c9:-:noCustomPhrase",
+            "check": 9,
+            "level": "warn",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "noCustomPhrase"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "9 risk: not listening for the phrase",
+      "covers": [
+        "9:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": false,
+          "wipeListens": false,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c9:-:notListening",
+            "check": 9,
+            "level": "risk",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "notListening"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "9 risk: online gate off",
+      "covers": [
+        "9:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": false,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c9:-:netGateOff",
+            "check": 9,
+            "level": "risk",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "netGateOff"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 3
+        }
+      }
+    },
+    {
+      "name": "10 ok: same as the newest peer",
+      "covers": [
+        "10:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": "1.4.0",
+          "newestPeerSeen": "1.4"
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          },
+          {
+            "id": "c10:-:current",
+            "check": 10,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "current",
+              "version": "1.4.0",
+              "peer": "1.4"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "10 warn: behind in minor/patch",
+      "covers": [
+        "10:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": "1.4.9",
+          "newestPeerSeen": "1.10.0"
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c10:-:behind",
+            "check": 10,
+            "level": "warn",
+            "action": "none",
+            "params": {
+              "reason": "behind",
+              "version": "1.4.9",
+              "peer": "1.10.0"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "10 risk: a major version behind",
+      "covers": [
+        "10:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": "1.9.9",
+          "newestPeerSeen": "2.0.0"
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c10:-:majorBehind",
+            "check": 10,
+            "level": "risk",
+            "action": "none",
+            "params": {
+              "reason": "majorBehind",
+              "version": "1.9.9",
+              "peer": "2.0.0"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "10 none: nothing known about peers",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": "1.4.0",
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "11 ok: off",
+      "covers": [
+        "11:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": {
+          "enabled": false,
+          "dataDir": "",
+          "serveConnected": false,
+          "unconfirmedEvents": 0
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          },
+          {
+            "id": "c11:-:off",
+            "check": 11,
+            "level": "ok",
+            "action": "openAssistant",
+            "params": {
+              "reason": "off"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "11 warn: on",
+      "covers": [
+        "11:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": {
+          "enabled": true,
+          "dataDir": "~/Library/Application Support/secuTG/assistant",
+          "serveConnected": true,
+          "unconfirmedEvents": 0
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c11:-:on",
+            "check": 11,
+            "level": "warn",
+            "action": "openAssistant",
+            "params": {
+              "reason": "on",
+              "dir": "~/Library/Application Support/secuTG/assistant",
+              "serveConnected": true,
+              "count": 0
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "11 risk: on with unconfirmed events",
+      "covers": [
+        "11:risk"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": {
+          "enabled": true,
+          "dataDir": "~/Library/Application Support/secuTG/assistant",
+          "serveConnected": false,
+          "unconfirmedEvents": 3
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c11:-:unconfirmed",
+            "check": 11,
+            "level": "risk",
+            "action": "openAssistant",
+            "params": {
+              "reason": "unconfirmed",
+              "dir": "~/Library/Application Support/secuTG/assistant",
+              "serveConnected": false,
+              "count": 3
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "ignore: hidden for 29 days",
+      "covers": [
+        "ignore"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c2:800:unverified": 1787494400000,
+        "c8:-:bundled": 1789999999999
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "800",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c1:800:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "800",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "ignore: back at exactly 30 days",
+      "covers": [
+        "ignore"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c2:800:unverified": 1787408000000,
+        "c8:-:bundled": 1787321600000
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "800",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c2:800:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "800",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:800:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "800",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "ignore: a time in the future does not hide (the clock was ahead when it was ignored)",
+      "covers": [
+        "ignore"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c2:800:unverified": 1790086400000,
+        "c8:-:bundled": 1790000000001
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "800",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c2:800:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "800",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:800:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "800",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "ignore: extreme stored times hide nothing",
+      "covers": [
+        "ignore"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c2:800:unverified": 9000000000000000,
+        "c8:-:bundled": -9000000000000000
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "800",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c2:800:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "800",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:800:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "800",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "ignore: a different reason is a different finding, ok findings are never hidden",
+      "covers": [
+        "ignore"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c8:-:env": 1789913600000,
+        "c1:800:paired": 1789913600000
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "800",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": null,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c7:-:never",
+            "check": 7,
+            "level": "risk",
+            "action": "openBackup",
+            "params": {
+              "reason": "never"
+            }
+          },
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c2:800:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "800",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c1:800:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "800",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 2,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "combined: sorting risk→warn→ok, then check, then chat id (code-unit order), global rows first",
+      "covers": [
+        "sort",
+        "combined"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {
+        "c9:-:noCustomPhrase": 1789740800000
+      },
+      "snapshot": {
+        "chats": [
+          {
+            "chatId": "900",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": true,
+            "plaintextOnDisk": false,
+            "cloned": false
+          },
+          {
+            "chatId": "1000",
+            "kind": "private",
+            "pairing": "mismatch",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": false,
+            "plaintextOnDisk": false,
+            "cloned": false
+          },
+          {
+            "chatId": "-910",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": 1772720000000,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": false,
+            "plaintextOnDisk": true,
+            "cloned": false
+          },
+          {
+            "chatId": "-911",
+            "kind": "group",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": false,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": true,
+            "groupPasswordUnlocked": false,
+            "keyRequired": false,
+            "plaintextOnDisk": false,
+            "cloned": false
+          },
+          {
+            "chatId": "920",
+            "kind": "private",
+            "pairing": "paired",
+            "verified": true,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": true,
+            "plaintextOnDisk": false,
+            "cloned": true
+          },
+          {
+            "chatId": "930",
+            "kind": "saved",
+            "pairing": "none",
+            "verified": false,
+            "inviteReceived": false,
+            "keyChangedInvite": false,
+            "hasKey": true,
+            "groupKeyCreatedMs": null,
+            "groupPasswordActive": false,
+            "groupPasswordUnlocked": false,
+            "keyRequired": true,
+            "plaintextOnDisk": false,
+            "cloned": false
+          }
+        ],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": false,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "bundled"
+        },
+        "backup": {
+          "lastBackupMs": 1789136000000,
+          "lastKeyChangeMs": 1789740800000
+        },
+        "version": {
+          "own": "1.0.0",
+          "newestPeerSeen": "1.1.0"
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c1:1000:mismatch",
+            "check": 1,
+            "level": "risk",
+            "chatId": "1000",
+            "action": "openChat",
+            "params": {
+              "reason": "mismatch"
+            }
+          },
+          {
+            "id": "c3:-910:keyVeryOld",
+            "check": 3,
+            "level": "risk",
+            "chatId": "-910",
+            "action": "openChat",
+            "params": {
+              "reason": "keyVeryOld",
+              "days": 200,
+              "limit": 90
+            }
+          },
+          {
+            "id": "c4:-911:offNoKey",
+            "check": 4,
+            "level": "risk",
+            "chatId": "-911",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "offNoKey"
+            }
+          },
+          {
+            "id": "c8:-:bundled",
+            "check": 8,
+            "level": "risk",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "bundled"
+            }
+          },
+          {
+            "id": "c2:900:unverified",
+            "check": 2,
+            "level": "warn",
+            "chatId": "900",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "unverified"
+            }
+          },
+          {
+            "id": "c3:-911:passwordLocked",
+            "check": 3,
+            "level": "warn",
+            "chatId": "-911",
+            "action": "openChat",
+            "params": {
+              "reason": "passwordLocked",
+              "limit": 90
+            }
+          },
+          {
+            "id": "c4:-910:offWithKey",
+            "check": 4,
+            "level": "warn",
+            "chatId": "-910",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "offWithKey"
+            }
+          },
+          {
+            "id": "c4:1000:offWithKey",
+            "check": 4,
+            "level": "warn",
+            "chatId": "1000",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "offWithKey"
+            }
+          },
+          {
+            "id": "c5:-:plaintextHistory",
+            "check": 5,
+            "level": "warn",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "plaintextHistory",
+              "count": 1
+            }
+          },
+          {
+            "id": "c6:920:cloned",
+            "check": 6,
+            "level": "warn",
+            "chatId": "920",
+            "action": "openChat",
+            "params": {
+              "reason": "cloned"
+            }
+          },
+          {
+            "id": "c7:-:stale",
+            "check": 7,
+            "level": "warn",
+            "action": "openBackup",
+            "params": {
+              "reason": "stale"
+            }
+          },
+          {
+            "id": "c10:-:behind",
+            "check": 10,
+            "level": "warn",
+            "action": "none",
+            "params": {
+              "reason": "behind",
+              "version": "1.0.0",
+              "peer": "1.1.0"
+            }
+          },
+          {
+            "id": "c1:900:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "900",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c1:920:paired",
+            "check": 1,
+            "level": "ok",
+            "chatId": "920",
+            "action": "openChat",
+            "params": {
+              "reason": "paired"
+            }
+          },
+          {
+            "id": "c2:920:verified",
+            "check": 2,
+            "level": "ok",
+            "chatId": "920",
+            "action": "openSafetyCode",
+            "params": {
+              "reason": "verified"
+            }
+          },
+          {
+            "id": "c4:900:on",
+            "check": 4,
+            "level": "ok",
+            "chatId": "900",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c4:920:on",
+            "check": 4,
+            "level": "ok",
+            "chatId": "920",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c4:930:on",
+            "check": 4,
+            "level": "ok",
+            "chatId": "930",
+            "action": "openLockMenu",
+            "params": {
+              "reason": "on"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 4,
+          "warn": 8,
+          "ok": 6
+        }
+      }
+    },
+    {
+      "name": "12 ok: two-step verification password is set (13 unknown)",
+      "covers": [
+        "12:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null,
+        "account": {
+          "twoStepPassword": true,
+          "otherSessions": null
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          },
+          {
+            "id": "c12:-:on",
+            "check": 12,
+            "level": "ok",
+            "action": "openTwoStep",
+            "params": {
+              "reason": "on"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "12 risk: no two-step verification password (13 ok: only this device signed in)",
+      "covers": [
+        "12:risk",
+        "13:ok"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null,
+        "account": {
+          "twoStepPassword": false,
+          "otherSessions": 0
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c12:-:off",
+            "check": 12,
+            "level": "risk",
+            "action": "openTwoStep",
+            "params": {
+              "reason": "off"
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          },
+          {
+            "id": "c13:-:none",
+            "check": 13,
+            "level": "ok",
+            "action": "openSessions",
+            "params": {
+              "reason": "none"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 1,
+          "warn": 0,
+          "ok": 5
+        }
+      }
+    },
+    {
+      "name": "13 warn: 2 other devices are signed in (12 unknown)",
+      "covers": [
+        "13:warn"
+      ],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null,
+        "account": {
+          "twoStepPassword": null,
+          "otherSessions": 2
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c13:-:others",
+            "check": 13,
+            "level": "warn",
+            "action": "openSessions",
+            "params": {
+              "reason": "others",
+              "count": 2
+            }
+          },
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 1,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "12/13 unknown: account present but both fields could not be read",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null,
+        "account": {
+          "twoStepPassword": null,
+          "otherSessions": null
+        }
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    },
+    {
+      "name": "12/13 absent: the snapshot has no account field at all (pre-3.46.2 shape, old vectors unaffected)",
+      "covers": [],
+      "now_ms": 1790000000000,
+      "ignored": {},
+      "snapshot": {
+        "chats": [],
+        "settings": {
+          "groupKeyMaxAgeDays": 90,
+          "localCiphertext": true,
+          "wipePhraseSet": true,
+          "wipeListens": true,
+          "netGateEnabled": true,
+          "apiCredentialSource": "user"
+        },
+        "backup": {
+          "lastBackupMs": null,
+          "lastKeyChangeMs": null
+        },
+        "version": {
+          "own": null,
+          "newestPeerSeen": null
+        },
+        "assistant": null
+      },
+      "expect": {
+        "findings": [
+          {
+            "id": "c5:-:on",
+            "check": 5,
+            "level": "ok",
+            "action": "openLocalCiphertext",
+            "params": {
+              "reason": "on"
+            }
+          },
+          {
+            "id": "c6:-:none",
+            "check": 6,
+            "level": "ok",
+            "action": "none",
+            "params": {
+              "reason": "none"
+            }
+          },
+          {
+            "id": "c8:-:user",
+            "check": 8,
+            "level": "ok",
+            "action": "openApiCredentials",
+            "params": {
+              "reason": "user"
+            }
+          },
+          {
+            "id": "c9:-:ready",
+            "check": 9,
+            "level": "ok",
+            "action": "openWipeSettings",
+            "params": {
+              "reason": "ready"
+            }
+          }
+        ],
+        "summary": {
+          "risk": 0,
+          "warn": 0,
+          "ok": 4
+        }
+      }
+    }
+  ]
+}

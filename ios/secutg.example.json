@@ -1,0 +1,29 @@
+{
+  "api_id": 0,
+  "api_hash": "00000000000000000000000000000000",
+  "app_name": "secuTG",
+  "watermark_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+  "watermark_amplitude": 1.5,
+  "crypto": {
+    "epoch_days": 1,
+    "epoch_tolerance": 1,
+    "rekey_reminder_days": 7,
+    "max_plaintext_chars": 3000
+  },
+  "distribution": {
+    "version": "0.0.7",
+    "channel": "official",
+    "site": "https://secutg.example.org",
+    "source": "https://github.com/example/secutg",
+    "relay_source": "https://github.com/example/secutg-relay",
+    "contact": "@secutg_support",
+    "faq": "",
+    "build": "written by the build script, do not fill by hand"
+  },
+  "sponsor": {
+    "note": "",
+    "qrs": [],
+    "links": [],
+    "addresses": []
+  }
+}
