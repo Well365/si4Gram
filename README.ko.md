@@ -2,7 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · **한국어** · [العربية](README.ar.md)
 
-이 저장소는 AI 코딩 에이전트(Claude Code)로 Si4Gram(코드명 *secuTG*)을 만들 때 사용한 **프롬프트**를 공개합니다. 앱 소스 코드는 들어 있지 않습니다. 앱은 대형 업스트림 Telegram 클라이언트 여러 개를 포크해 로컬에서 많이 수정한 것이라, 여기서는 에이전트 지침, 가드레일, 프롬프트 템플릿만 공개합니다.
+이 저장소는 AI 코딩 에이전트(Claude Code)로 Si4Gram(코드명 *secuTG*)을 만들 때 사용한 **프롬프트**(에이전트 지침, 가드레일, 프롬프트 템플릿)를 공개합니다.
+
+**앱 소스 코드:** [`ios/`](ios/) 폴더에는 Si4Gram iOS 앱(App Store 1.0.1)의 전체 소스 코드가 들어 있습니다. [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS)를 수정한 것이며 **GPL v2** 라이선스를 따릅니다([`ios/COPYING`](ios/COPYING) 참고). 무엇이 들어 있고 무엇을 뺐는지(API 인증 정보, 서명 파일), 어떻게 빌드하는지는 [`ios/SOURCE-NOTICE.md`](ios/SOURCE-NOTICE.md)에 있습니다.
 
 비슷한 것을 만들고 있다면(기존 오픈소스 앱 위에 올리는 보안 레이어, 똑같이 동작해야 하는 여러 플랫폼, 또는 사람 없이는 절대 행동해서는 안 되는 AI 어시스턴트) 이 프롬프트와 그 뒤에 있는 교훈을 그대로 가져다 쓸 수 있을 것입니다.
 

@@ -2,7 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · **日本語** · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [한국어](README.ko.md) · [العربية](README.ar.md)
 
-このリポジトリでは、AI コーディングエージェント（Claude Code）を使って Si4Gram（コードネーム *secuTG*）を開発したときの**プロンプト**を公開しています。アプリのソースコードは含まれていません。アプリは複数の大規模な上流 Telegram クライアントからフォークしたもので、ローカルでの変更が多いため、ここではエージェントへの指示、ガードレール、プロンプトテンプレートだけを公開しています。
+このリポジトリでは、AI コーディングエージェント（Claude Code）を使って Si4Gram（コードネーム *secuTG*）を開発したときの**プロンプト**（エージェントへの指示、ガードレール、プロンプトテンプレート）を公開しています。
+
+**アプリのソースコード**：[`ios/`](ios/) フォルダーには Si4Gram iOS アプリ（App Store 版 1.0.1）の完全なソースコードが入っています。[Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) を改変したもので、ライセンスは **GPL v2** です（[`ios/COPYING`](ios/COPYING) を参照）。含まれるもの、除外したもの（API 認証情報、署名ファイル）、ビルド方法は [`ios/SOURCE-NOTICE.md`](ios/SOURCE-NOTICE.md) にあります。
 
 似たようなもの（既存のオープンソースアプリの上に載せるセキュリティレイヤー、まったく同じ動作が求められる複数プラットフォーム、人間抜きでは決して行動してはならない AI アシスタントなど）を作っているなら、これらのプロンプトとその背景にある教訓はそのまま再利用できるはずです。
 

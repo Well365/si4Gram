@@ -2,7 +2,9 @@
 
 [English](README.md) · **简体中文** · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [한국어](README.ko.md) · [العربية](README.ar.md)
 
-本仓库公开的是借助 AI 编程智能体（Claude Code）构建 Si4Gram（代号 *secuTG*）时所用的**提示词**，不包含任何应用源代码。这个应用基于多个大型上游 Telegram 客户端分叉而来，本地改动很多，因此这里只发布智能体指令、护栏规则和提示词模板。
+本仓库公开的是借助 AI 编程智能体（Claude Code）构建 Si4Gram（代号 *secuTG*）时所用的**提示词**：智能体指令、护栏规则和提示词模板。
+
+**App 源代码**：[`ios/`](ios/) 目录是 Si4Gram iOS App（App Store 1.0.1 版）的完整源代码，基于 [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) 修改，采用 **GPL v2** 许可证（见 [`ios/COPYING`](ios/COPYING)）。里面包含什么、去掉了什么（API 凭据、签名文件）以及怎么编译，见 [`ios/SOURCE-NOTICE.md`](ios/SOURCE-NOTICE.md)。
 
 如果你在做类似的事情（在现有开源应用之上加一层安全层、让多个平台行为完全一致，或者做一个绝不能在没有人类参与时自行行动的 AI 助手），这些提示词以及背后的经验应该可以直接复用。
 

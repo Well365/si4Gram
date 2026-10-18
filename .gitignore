@@ -25,3 +25,12 @@ secutg.json
 # Local Claude Code state
 .claude/settings.local.json
 .claude/worktrees/
+
+# ios/ is an upstream-based source tree with its own .gitignore. Upstream ships
+# placeholder (fake) signing files and editor settings there on purpose; keep
+# the root rules above from hiding them. Real signing files stay ignored.
+!/ios/build-system/fake-codesigning/**
+!/ios/build-system/example-configuration/provisioning/**
+!/ios/buildbox/fake-codesigning/**
+!/ios/third-party/**
+!/ios/**/.vscode/

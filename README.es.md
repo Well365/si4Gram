@@ -2,7 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · **Español** · [한국어](README.ko.md) · [العربية](README.ar.md)
 
-Este repositorio publica los **prompts** usados para construir Si4Gram (nombre en clave *secuTG*) con agentes de programación de IA (Claude Code). No contiene código fuente de la aplicación. La app es un fork de varios clientes de Telegram de gran tamaño, con muchos cambios locales, así que aquí solo se publican las instrucciones para los agentes, las salvaguardas y las plantillas de prompts.
+Este repositorio publica los **prompts** usados para construir Si4Gram (nombre en clave *secuTG*) con agentes de programación de IA (Claude Code): instrucciones para los agentes, salvaguardas y plantillas de prompts.
+
+**Código fuente de la app:** la carpeta [`ios/`](ios/) contiene el código fuente completo de la app Si4Gram para iOS (App Store 1.0.1). Es una versión modificada de [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) y se distribuye bajo licencia **GPL v2** (ver [`ios/COPYING`](ios/COPYING)). Qué incluye, qué se dejó fuera (credenciales de la API, archivos de firma) y cómo compilarla se explica en [`ios/SOURCE-NOTICE.md`](ios/SOURCE-NOTICE.md).
 
 Si estás construyendo algo parecido (una capa de seguridad sobre una app de código abierto existente, varias plataformas que deben comportarse exactamente igual, o un asistente de IA que nunca debe actuar sin una persona), los prompts y las lecciones que hay detrás deberían servirte.
 

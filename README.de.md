@@ -2,7 +2,9 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · **Deutsch** · [Français](README.fr.md) · [Español](README.es.md) · [한국어](README.ko.md) · [العربية](README.ar.md)
 
-Dieses Repository veröffentlicht die **Prompts**, mit denen Si4Gram (Codename *secuTG*) mithilfe von KI-Coding-Agenten (Claude Code) entwickelt wurde. Es enthält keinen Quellcode der Anwendung. Die App ist ein Fork mehrerer großer Telegram-Clients mit vielen lokalen Änderungen, deshalb werden hier nur die Agenten-Anweisungen, Leitplanken und Prompt-Vorlagen veröffentlicht.
+Dieses Repository veröffentlicht die **Prompts**, mit denen Si4Gram (Codename *secuTG*) mithilfe von KI-Coding-Agenten (Claude Code) entwickelt wurde: Agenten-Anweisungen, Leitplanken und Prompt-Vorlagen.
+
+**Quellcode der App:** Der Ordner [`ios/`](ios/) enthält den vollständigen Quellcode der Si4Gram-iOS-App (App Store 1.0.1). Er ist eine veränderte Fassung von [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) und steht unter der **GPL v2** (siehe [`ios/COPYING`](ios/COPYING)). Was enthalten ist, was weggelassen wurde (API-Zugangsdaten, Signierdateien) und wie man baut, steht in [`ios/SOURCE-NOTICE.md`](ios/SOURCE-NOTICE.md).
 
 Wenn du etwas Ähnliches baust (eine Sicherheitsschicht auf einer bestehenden Open-Source-App, mehrere Plattformen, die sich exakt gleich verhalten müssen, oder einen KI-Assistenten, der nie ohne einen Menschen handeln darf), sollten die Prompts und die Lehren dahinter wiederverwendbar sein.
 
