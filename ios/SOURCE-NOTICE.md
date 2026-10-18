@@ -9,6 +9,24 @@ Si4Gram is not affiliated with or endorsed by Telegram.
 The Si4Gram changes (the `Secutg*` modules, `submodules/SecutgCore`, and the hooks marked
 `SECUTG-HOOK` in upstream files) are © 2026 Si4Key and are released under the same license.
 
+## Upstream base
+
+| | |
+|---|---|
+| Upstream repository | https://github.com/TelegramMessenger/Telegram-iOS |
+| Branch | `master` |
+| Base commit | `6ad963e5b62d354da79040f388ae2b9132fb17b8` (2026-07-18, "Merge branch 'master' into beta") |
+| Si4Gram changes on top | 366 commits, 809 files, +86,019 / −944 lines (history not published; this is a snapshot) |
+| Snapshot of | Si4Gram `si4gram-appstore` at `966672c0` |
+
+To see every Si4Gram change, check out the base commit of upstream and compare it with this directory:
+
+```
+git clone https://github.com/TelegramMessenger/Telegram-iOS.git upstream
+git -C upstream checkout 6ad963e5b62d354da79040f388ae2b9132fb17b8
+diff -ruN upstream ios    # or copy ios/ over the checkout and run `git -C upstream diff --stat`
+```
+
 ## What is not included
 
 - Telegram API credentials. `build-system/secutg-appstore-configuration.json` contains
