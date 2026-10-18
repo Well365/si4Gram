@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local secrets / config never belong here
+.env
+.env.*
+secutg.json
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Local Claude Code state
+.claude/settings.local.json
+.claude/worktrees/

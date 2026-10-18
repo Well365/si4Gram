@@ -1,0 +1,86 @@
+{
+  "env": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "safe.bareRepository",
+    "GIT_CONFIG_VALUE_0": "explicit"
+  },
+  "permissions": {
+    "allow": [
+      "Skill(secutg-task)",
+      "Skill(secutg-jira)",
+      "Skill(secutg-review)",
+      "Read(~/Library/Application Support/secutg-assistant/tasks/**)",
+      "Edit(~/Library/Application Support/secutg-assistant/tasks/*/result.md)",
+      "Edit(~/Library/Application Support/secutg-assistant/tasks/*/notes.md)",
+      "Edit(~/Library/Application Support/secutg-assistant/tasks/*/error.md)"
+    ],
+    "deny": [
+      "Bash(secutg-mate send)",
+      "Bash(secutg-mate send *)",
+      "Bash(python3 -m mate send *)",
+      "Bash(curl)",
+      "Bash(curl *)",
+      "Bash(wget)",
+      "Bash(wget *)",
+      "Bash(gh)",
+      "Bash(gh *)",
+      "WebFetch",
+      "WebSearch",
+      "Read(~/Library/Application Support/secutg-assistant/secrets.toml)",
+      "Read(~/Library/Application Support/secutg-assistant/secrets.json)",
+      "Read(~/Library/Application Support/secutg-assistant/mate.toml)",
+      "Read(~/Library/Application Support/secutg-assistant/mate.toml.bak)",
+      "Read(~/Library/Application Support/secutg-assistant/mate.db*)",
+      "Read(~/Library/Application Support/secutg-assistant/console.token)",
+      "Read(~/Library/Application Support/secutg-assistant/queue/**)",
+      "Read(~/Library/Application Support/secutg-assistant/control.sock)",
+      "Read(~/Library/Application Support/secutg-assistant/watermarks.json)"
+    ],
+    "ask": [
+      "Bash(secutg-mate task approve-reply)",
+      "Bash(secutg-mate task approve-reply *)",
+      "Bash(python3 -m mate task approve-reply *)",
+      "Bash(python -m mate task approve-reply *)",
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.9/bin/python3 -m mate task approve-reply *)",
+      "Bash(env *)",
+      "Bash(git push)",
+      "Bash(git push *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/skills/secutg-task/scripts/secutg-session-hook.py\" session-start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/skills/secutg-task/scripts/secutg-session-hook.py\" file-changed",
+            "asyncRewake": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/skills/secutg-task/scripts/secutg-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
